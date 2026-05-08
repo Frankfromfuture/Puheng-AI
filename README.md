@@ -1,55 +1,35 @@
-# Puheng AI / 清大浦恒 AI
+# 清大浦恒 AI
 
-## 中文简介
+清大浦恒 AI 是面向企业研究、投资判断、招商落地、资本合作与资源赋能的企业智能分析平台。
 
-清大浦恒 AI 是面向企业研究、投资判断、招商落地、资本合作和资源赋能的企业智能分析平台。系统支持搭建可编辑的分析框架，自动检索公开资料，按章节生成分析内容，预览和修订报告，并导出 Word 分析报告。
+它不是一个单纯的报告生成器，而是一个面向企业事实、产业关系、资本事件、团队背景、区域资源和合作路径的智能分析工作台。平台将分散的公开资料、人工经验和业务判断组织成可编辑、可追溯、可推理、可输出的企业知识网络，并围绕“这家公司是谁、为什么重要、与我们有什么关系、能如何合作、风险在哪里”形成结构化判断。
 
-平台服务于浦恒的企业评估与合作推进工作流，重点覆盖企业基础信息、创始人与核心团队、市场地位、资本合作、合作点交叉指引、落地合作和企业风险分析。系统目标不是生成泛泛的企业介绍，而是形成可用于投资、招商、资源对接和合作判断的结构化分析。
+清大浦恒 AI 的长期目标，是把企业分析从文本整理升级为知识驱动的决策系统：先建立企业与人物、机构、基金、区域、产业链、客户、供应商、政策和风险之间的关系，再基于这些关系生成面向投资、招商、资本合作和落地赋能的分析报告。
 
-## English Overview
+## 项目定位
 
-Puheng AI is an enterprise intelligence analysis platform for company research, investment assessment, investment-attraction landing, capital cooperation, and resource enablement. It helps users build editable report frameworks, search public information, generate section-level analysis, preview and refine reports, and export Word documents.
+- 企业智能分析平台：把公开信息、搜索结果、内部资源和人工判断沉淀为企业分析资产。
+- 投资与招商决策工具：突出公司价值、市场地位、融资资本、股东资源、合作窗口和落地路径。
+- 合作赋能工作台：将“我方强资源、重点区域、落地方式”与企业需求进行交叉分析。
+- 企业知识网络雏形：逐步连接企业、人物、机构、基金、产业链、园区、政府平台和风险事件。
+- 报告生产系统：支持章节级生成、完整报告生成、Markdown 预览、复制和 Word 导出。
 
-The platform is designed for Puheng's enterprise evaluation and cooperation workflow. It focuses on company fundamentals, founder and management teams, market position, capital cooperation, cooperation-point cross-analysis, landing cooperation, and enterprise risk analysis. Its goal is not generic company profiling, but actionable analysis for investment, landing, resource matching, and cooperation decisions.
+## 核心能力
 
-## 核心功能 / Core Features
+- 可编辑分析框架：支持一级、二级章节配置，新增章节可参与搜索、提示词和报告生成流程。
+- 章节级智能生成：每个一级、二级章节都可以单独生成，也可以一键生成完整分析报告。
+- 多渠道资料搜索：章节生成前自动扩展搜索词，整理公开来源，为模型推理提供数据底座。
+- 投资与合作导向提示词：围绕投资判断、招商落地、资本合作、资源赋能进行交叉分析。
+- Markdown 报告预览：支持加粗、段落留白、结论性表达和真实 Markdown 表格渲染。
+- Word 报告导出：按大标题、一级标题、二级标题、正文和表格结构自动生成 Word 文件。
+- 已生成内容复制：只复制真正有内容的章节，自动排除空章节或只有标题的章节。
+- 模型联通检测：设置中的模型状态会真实测试接口联通情况，而不是只判断是否已填写配置。
+- 移动端适配：通过侧边栏隐藏、面板切换和紧凑布局支持手机查看与操作。
+- 扩展模块预留：已预留企业数据库、企业立体关联信息等未来入口。
 
-- 可编辑的企业分析框架，支持一级、二级章节配置。
-- Editable enterprise analysis framework with first-level and second-level sections.
+## 默认分析框架
 
-- 支持单章节生成与完整报告生成。
-- Section-by-section generation and full-report generation.
-
-- 章节生成前自动进行公开资料搜索，包括搜索词扩展、多渠道检索、来源排序和摘要提取。
-- Automatic public-source search before section generation, including query expansion, multi-channel retrieval, source ranking, and source summaries.
-
-- 提示词工程工作区，支持全局风格、章节提示词、深度要求和资源说明维护。
-- Prompt engineering workspace for global style, section prompts, depth instructions, and resource notes.
-
-- Markdown 分析报告预览，支持加粗、段落留白和真实表格渲染。
-- Markdown report preview with bold text, readable paragraph spacing, and rendered tables.
-
-- 每个一级、二级章节支持单独生成。
-- Independent generation for each first-level and second-level section.
-
-- 支持复制已生成内容，自动排除空章节或只有标题的章节。
-- Copy generated content while excluding empty or title-only sections.
-
-- 支持 Word 导出，包含大标题、副标题、章节标题、正文和 Markdown 表格转换。
-- Word export with title, subtitle, headings, body text, and Markdown table conversion.
-
-- 支持配置强资源赋能、重点落地区域和落地合作方式。
-- Configurable strong resources, landing regions, and landing cooperation methods.
-
-- 手机端支持菜单栏和面板切换，适配框架、合作点和报告预览。
-- Mobile-responsive layout with menu and panel switching for framework, cooperation guide, and report preview.
-
-- 已预留企业数据库与企业立体关联信息入口。
-- Placeholder modules for enterprise database and enterprise relationship intelligence.
-
-## 默认分析框架 / Default Analysis Framework
-
-中文框架包括：
+当前默认框架覆盖：
 
 - 基础信息速览
 - 工商信息
@@ -69,7 +49,170 @@ The platform is designed for Puheng's enterprise evaluation and cooperation work
 - 企业风险分析
 - 引用来源附录
 
-English framework coverage:
+框架可以在界面中继续编辑。后续新增章节会走统一的搜索、提示词和生成链路，便于把新的分析维度纳入同一套工作流。
+
+## 搜索与数据源流程
+
+章节生成前，后端会根据以下信息构造搜索词：
+
+- 企业名称
+- 章节标题
+- 章节备注
+- 已知章节类型
+- 资本、工商、新闻、产业和落地相关定向信源
+
+检索结果会经过去重、排序、摘要提取和来源整理，再作为模型推理的数据底座。模型被要求优先引用已列明来源 ID，对不确定事项标注“待核实”，禁止编造融资金额、估值、股东、客户、负面信息等事实。
+
+## 报告风格
+
+- 结论先行，先写判断，再写依据。
+- 表达简洁、直接、有逻辑。
+- 突出与投资、招商落地、合作赋能相关的交叉分析。
+- 不能编造无来源事实。
+- 适合结构化的信息尽量使用表格。
+- 表格与关键文字判断穿插，不做全表格堆砌。
+- 关键结论使用 Markdown 加粗。
+- 段落之间保留空行，提高可读性。
+
+## 版本路线图
+
+### 0.8：本地工作台
+
+- 完成企业智能分析平台基础界面。
+- 完成分析框架、章节生成、完整报告生成、Markdown 预览和 Word 导出。
+- 完成模型配置、模型联通检测、公开资料搜索增强和来源整理。
+- 完成手机端响应式显示、侧边栏隐藏与面板切换。
+- 补充 MIT License 与基础开源说明。
+
+### 1.0：单机正式版
+
+- 强化章节级搜索、引用来源、表格与文字混排、报告质量控制和导出模板。
+- 支持更稳定的本地状态保存、企业报告版本管理、批量章节刷新和历史报告复用。
+- 将投资判断、招商落地、资本合作、资源赋能的交叉分析进一步产品化。
+- 完善提示词工作区，使用户新增章节后也能稳定获得有效内容。
+
+### 2.0：云端访问版
+
+- 部署到云服务器，支持公网或内网访问。
+- 配置生产域名、HTTPS、反向代理、日志、备份和监控。
+- 将模型 API、搜索接口、文件存储等配置迁移到服务端安全配置。
+- 支持云端文件存储、报告导出记录、来源快照和基础运维面板。
+
+### 3.0：多用户数据库版
+
+- 接入数据库，持久化企业项目、分析框架、章节内容、来源、文件、报告版本和导出记录。
+- 增加用户登录、组织空间、角色权限、项目权限、章节锁定、评论、审核确认和操作日志。
+- 建设企业数据库模块，支持企业列表、筛选、标签、行业分类、区域分类、融资状态、合作阶段和跟进状态。
+- 支持不同团队维护各自的资源池、区域库、提示词模板和报告模板。
+
+### 4.0：企业知识库版
+
+- 建立企业知识库，统一管理工商信息、融资事件、股东、团队、财务、客户、供应商、风险和合作记录。
+- 支持资料上传、网页快照、搜索结果、人工标注、结构化字段沉淀和跨报告事实复用。
+- 将企业知识库与分析报告连接，报告引用可追溯到知识库条目和来源证据。
+- 支持同一企业多次分析、跨报告复用事实、自动发现信息变化。
+
+### 5.0：企业立体关联分析版
+
+- 建设企业立体关联信息系统，展示企业、创始人、高管、股东、投资机构、基金、客户、供应商、园区和政府平台之间的多层关系。
+- 支持股权、投资、任职、校友、产业链、基金 LP/GP、合作关系、路径分析、关键节点识别和风险穿透。
+- 建立企业语义知识模型，将自然语言资料抽取为结构化知识。
+- 支持跨实体推理、共同关联方发现和基于知识结构的报告生成。
+
+### 6.0+：智能工作流与自动监控
+
+- 自动监控企业新闻、融资、工商变更、诉讼风险、招股书和公告更新。
+- 对重要变化触发提醒、生成更新摘要或自动刷新相关章节。
+- 支持定期企业跟踪报告、重点企业周报、招商项目看板和投资机会雷达。
+
+## 本地开发
+
+```bash
+npm install
+npm run dev
+```
+
+前端：
+
+```text
+http://localhost:5173/
+```
+
+后端：
+
+```text
+http://localhost:8787/
+```
+
+## 校验
+
+```bash
+npm run check
+npm run build
+```
+
+## 配置
+
+模型配置在应用内完成。当前支持：
+
+- DashScope / OpenAI-compatible chat completion APIs
+- Alibaba Cloud OpenSearch LLM text-generation endpoint
+
+API Key 会保存在本地应用状态中，界面只显示脱敏信息。
+
+## 项目结构
+
+```text
+src/              React 前端
+server/           Express 后端与报告生成逻辑
+data/             本地应用状态
+uploads/          上传资料
+exports/          导出的 Word 文件
+public/           logo.svg 等静态资源
+```
+
+## 开源协议
+
+本项目使用 MIT License。详见 [LICENSE](LICENSE)。
+
+## 注意事项
+
+当前项目仍以本地使用为主。生成报告需要人工审核，尤其是公开资料不完整、来源冲突或标记为“待核实”的内容。
+
+---
+
+# Puheng AI
+
+Puheng AI is an enterprise intelligence platform for company research, investment assessment, landing cooperation, capital collaboration, and resource enablement.
+
+It is not merely a report generator. It is an analytical workspace that organizes company facts, industry relationships, capital events, team backgrounds, regional resources, and cooperation paths into an editable, traceable, and reasoning-ready enterprise knowledge network. Around one company, the system helps answer: who it is, why it matters, how it relates to us, how we can work with it, and where the risks are.
+
+The long-term vision of Puheng AI is to move enterprise analysis from text assembly to knowledge-driven decision support. The platform first connects companies with people, institutions, funds, regions, industrial chains, customers, suppliers, policies, and risk events, then generates reports for investment, landing, capital cooperation, and resource enablement.
+
+## Positioning
+
+- Enterprise intelligence platform: turns public information, search results, internal resources, and human judgment into reusable analysis assets.
+- Investment and landing decision tool: highlights company value, market position, financing history, shareholder resources, cooperation windows, and landing paths.
+- Cooperation enablement workspace: cross-analyzes Puheng's strong resources, target regions, and cooperation methods against company needs.
+- Enterprise knowledge network foundation: gradually connects companies, people, institutions, funds, industrial chains, parks, government platforms, and risk events.
+- Report production system: supports section-level generation, full-report generation, Markdown preview, copying, and Word export.
+
+## Core Capabilities
+
+- Editable analysis framework: supports configurable first-level and second-level sections. Newly added sections participate in search, prompting, and report generation.
+- Section-level generation: each section can be generated independently, while full reports can be generated in one flow.
+- Multi-source public search: expands search queries before generation and organizes sources for model reasoning.
+- Investment and cooperation-oriented prompts: emphasizes investment assessment, landing cooperation, capital collaboration, and resource enablement.
+- Markdown report preview: supports bold text, paragraph spacing, conclusion-first writing, and real Markdown table rendering.
+- Word export: automatically exports titles, headings, body text, and tables into a Word document.
+- Generated-content copying: copies only sections with real generated content and excludes empty or title-only sections.
+- Model connection checks: the settings panel tests actual model connectivity rather than only checking whether fields are filled.
+- Mobile optimization: supports sidebar collapse, panel switching, and compact layouts.
+- Reserved expansion modules: includes placeholders for enterprise databases and relationship intelligence.
+
+## Default Analysis Framework
+
+The default framework covers:
 
 - Basic enterprise overview
 - Business registration
@@ -89,17 +232,9 @@ English framework coverage:
 - Enterprise risk analysis
 - Citation appendix
 
-The framework can be edited in the UI. Newly added sections are supported by dynamic search-query generation and generic prompt handling, so custom chapters can participate in the same generation workflow.
+The framework can be edited in the UI. Newly added sections follow the same search, prompting, and generation workflow.
 
-## 搜索与数据源流程 / Search And Source Workflow
-
-章节生成前，后端会根据以下信息构造搜索词：
-
-- 企业名称
-- 章节标题
-- 章节备注
-- 已知章节类型
-- 资本、工商、新闻、产业和落地相关定向信源
+## Search And Source Workflow
 
 Before section generation, the backend builds search queries from:
 
@@ -109,209 +244,120 @@ Before section generation, the backend builds search queries from:
 - Known section type
 - Capital, registry, news, industry, and landing-related source domains
 
-检索结果会经过去重、排序、摘要提取和来源整理，再作为模型推理的数据底座。模型被要求优先引用已列明来源 ID，对不确定事项标注“待核实”，禁止编造融资金额、估值、股东、客户、负面信息等事实。
-
 Search results are deduplicated, ranked, summarized, and injected into the model prompt as source material. The model is instructed to cite available source IDs, mark uncertain items as pending verification, and avoid unsupported claims such as financing amounts, valuations, shareholders, customers, or negative information.
 
-## 报告风格 / Report Style
-
-中文报告风格：
-
-- 结论先行，先写判断，再写依据。
-- 表达简洁、直接、有逻辑。
-- 不能编造无来源事实。
-- 适合结构化的信息使用表格。
-- 表格与关键文字判断穿插，不做全表格堆砌。
-- 关键结论使用 Markdown 加粗。
-- 段落之间保留空行，提高可读性。
-
-English report style:
+## Report Style
 
 - Conclusion first, followed by evidence.
 - Concise, direct, and logical writing.
+- Emphasize cross-analysis for investment, landing, cooperation, and resource enablement.
 - No unsupported factual claims.
-- Use tables for structured information.
+- Use tables whenever information is naturally structured.
 - Interleave tables with key narrative judgments instead of table-only output.
 - Highlight key conclusions with Markdown bold.
 - Keep paragraph spacing for readability.
 
-## 路线图 / Roadmap
+## Roadmap
 
-### 阶段 1：本地原型与单机工作台 / Phase 1: Local Prototype And Single-User Workspace
+### 0.8: Local Workspace
 
-- 完成企业智能分析平台基础界面。
-- Build the core enterprise intelligence analysis dashboard.
+- Complete the core enterprise intelligence platform UI.
+- Complete the analysis framework, section generation, full-report generation, Markdown preview, and Word export.
+- Add model configuration, model connection checks, stronger public-source search, and source organization.
+- Complete mobile-responsive display, sidebar collapse, and panel switching.
+- Add MIT License and basic open-source information.
 
-- 支持本地状态保存、章节生成、报告预览和 Word 导出。
-- Support local state, section generation, report preview, and Word export.
+### 1.0: Single-User Stable Release
 
-- 优化提示词工程、公开资料搜索和章节级引用。
-- Improve prompt engineering, public-source search, and section-level citations.
+- Improve section-level search, citations, mixed table-and-narrative output, report quality control, and export templates.
+- Support more reliable local state, report version management, batch section refresh, and historical report reuse.
+- Productize cross-analysis for investment assessment, landing cooperation, capital cooperation, and resource enablement.
+- Improve the prompt workspace so user-added sections can reliably generate useful content.
 
-- 完成手机端响应式显示和面板切换。
-- Complete mobile-responsive display and panel switching.
+### 2.0: Cloud Access Release
 
-### 阶段 2：上云与服务器访问 / Phase 2: Cloud Deployment And Server Access
+- Deploy to cloud servers with public or private network access.
+- Configure production domains, HTTPS, reverse proxy, logging, backups, and monitoring.
+- Move model APIs, search integrations, and file storage configuration to secure server-side configuration.
+- Support cloud file storage, export records, source snapshots, and a basic operations dashboard.
 
-- 部署到云服务器，支持公网或内网访问。
-- Deploy to a cloud server with public or private network access.
+### 3.0: Multi-User Database Release
 
-- 配置生产环境域名、HTTPS、反向代理和日志管理。
-- Configure production domain, HTTPS, reverse proxy, and logging.
+- Connect a database to persist projects, frameworks, sections, sources, files, report versions, and export records.
+- Add login, workspaces, roles, project permissions, section locking, comments, review confirmation, and operation logs.
+- Build an enterprise database module with company lists, filters, tags, industry/region categories, financing status, cooperation stage, and follow-up status.
+- Allow different teams to maintain their own resource pools, regional libraries, prompt templates, and report templates.
 
-- 将模型 API、搜索接口、文件存储等配置从本地状态迁移到服务端安全配置。
-- Move model APIs, search integrations, and file storage configuration from local state to secure server-side configuration.
+### 4.0: Enterprise Knowledge Base Release
 
-- 建立服务器级备份、恢复和监控机制。
-- Add server-level backup, recovery, and monitoring.
-
-### 阶段 3：数据库化与持久化 / Phase 3: Database And Persistent Storage
-
-- 接入数据库，持久化企业项目、分析框架、章节内容、来源、文件和导出记录。
-- Connect a database to persist projects, frameworks, sections, sources, files, and export records.
-
-- 支持企业历史版本、报告版本、章节版本和来源追踪。
-- Support company history, report versions, section versions, and source lineage.
-
-- 将上传文件、Word 报告、来源快照迁移到对象存储或云文件系统。
-- Move uploaded files, Word reports, and source snapshots to object storage or cloud file systems.
-
-- 建立数据备份、权限隔离和审计日志。
-- Add backups, permission isolation, and audit logs.
-
-### 阶段 4：多用户与组织协作 / Phase 4: Multi-User And Team Collaboration
-
-- 增加用户登录、组织空间、角色权限和项目权限。
-- Add user login, workspaces, roles, and project permissions.
-
-- 支持多人协作编辑、章节锁定、评论、审核和确认流程。
-- Support collaborative editing, section locking, comments, review, and confirmation workflows.
-
-- 增加任务分配、生成记录、操作日志和报告审批。
-- Add task assignment, generation records, operation logs, and report approval.
-
-- 支持不同团队维护各自的资源池、区域库、提示词模板和报告模板。
-- Allow teams to maintain their own resource pools, region libraries, prompt templates, and report templates.
-
-### 阶段 5：企业知识库管理 / Phase 5: Enterprise Knowledge Base Management
-
-- 建立企业知识库，统一管理工商信息、融资事件、股东、团队、财务、客户、供应商、风险和合作记录。
-- Build an enterprise knowledge base for business registration, financing events, shareholders, teams, finance, customers, suppliers, risks, and cooperation records.
-
-- 支持资料上传、网页快照、搜索结果、人工标注和结构化字段沉淀。
-- Support uploads, web snapshots, search results, manual annotations, and structured fields.
-
-- 将企业知识库与分析报告连接，报告引用可追溯到知识库条目。
-- Connect the knowledge base with analysis reports so report citations trace back to knowledge entries.
-
-- 支持同一企业多次分析、跨报告复用事实、自动发现信息变化。
+- Build an enterprise knowledge base for registry data, financing events, shareholders, teams, finance, customers, suppliers, risks, and cooperation records.
+- Support uploads, web snapshots, search results, manual annotations, structured fields, and fact reuse across reports.
+- Connect the knowledge base with analysis reports so citations trace back to knowledge entries and source evidence.
 - Support repeated analysis of the same company, fact reuse across reports, and automatic change detection.
 
-### 阶段 6：企业数据库 / Phase 6: Enterprise Database
+### 5.0: Enterprise Relationship Intelligence Release
 
-- 建设企业数据库模块，支持企业列表、筛选、标签、行业分类和区域分类。
-- Build an enterprise database module with company lists, filters, tags, industry categories, and regional categories.
+- Build a relationship intelligence system mapping companies, founders, executives, shareholders, investors, funds, customers, suppliers, parks, and government platforms.
+- Support equity, investment, employment, alumni, industrial-chain, fund LP/GP, cooperation relationships, path analysis, key-node detection, and risk penetration.
+- Build an enterprise semantic knowledge model that extracts structured knowledge from natural-language materials.
+- Support cross-entity reasoning, shared-party discovery, and knowledge-structured report generation.
 
-- 支持企业画像卡片、融资状态、合作阶段、招商阶段、风险等级和跟进状态。
-- Support company profile cards, financing status, cooperation stage, landing stage, risk level, and follow-up status.
+### 6.0+: Intelligent Workflow And Monitoring
 
-- 支持批量导入、批量更新、企业去重和企业别名管理。
-- Support batch import, batch update, entity deduplication, and alias management.
-
-- 与报告生成模块打通，从企业数据库直接发起分析报告。
-- Connect the enterprise database to report generation.
-
-### 阶段 7：企业立体关联信息系统 / Phase 7: Enterprise Relationship Intelligence System
-
-- 建设企业立体关联信息模块，展示企业、创始人、高管、股东、投资机构、基金、客户、供应商、园区、政府平台之间的多层关系。
-- Build a relationship intelligence module to map companies, founders, executives, shareholders, investors, funds, customers, suppliers, parks, and government platforms.
-
-- 支持股权关系、投资关系、任职关系、校友关系、产业链关系、基金 LP/GP 关系和合作关系。
-- Support equity, investment, employment, alumni, industrial-chain, fund LP/GP, and cooperation relationships.
-
-- 提供关系图谱、路径分析、关键节点识别、共同关联方发现和风险穿透。
-- Provide relationship graphs, path analysis, key node identification, shared-party discovery, and risk penetration.
-
-- 与报告章节联动，让“股东结构、重要股东、产业基金、上下游企业、合作点”能够直接调用关系图谱结果。
-- Connect relationship intelligence with report sections such as shareholding, important shareholders, industrial funds, upstream/downstream companies, and cooperation points.
-
-### 阶段 8：本体论方向分析系统 / Phase 8: Ontology-Oriented Analysis System
-
-- 建立企业分析本体，定义企业、人物、机构、基金、项目、区域、政策、资产、事件、风险、合作点等核心实体。
-- Build an enterprise-analysis ontology covering companies, people, institutions, funds, projects, regions, policies, assets, events, risks, and cooperation points.
-
-- 建立关系类型、事件类型、证据类型、置信度、时间有效性和来源可信度模型。
-- Define relationship types, event types, evidence types, confidence, temporal validity, and source reliability models.
-
-- 将自然语言资料抽取为结构化知识，并支持企业间横向比较和跨实体推理。
-- Extract structured knowledge from natural-language materials and support cross-company comparison and cross-entity reasoning.
-
-- 支持基于本体的分析报告生成，使报告逻辑从“文本生成”升级为“知识推理 + 报告生成”。
-- Enable ontology-driven report generation, upgrading the logic from text generation to knowledge reasoning plus report generation.
-
-### 阶段 9：智能工作流与自动监控 / Phase 9: Intelligent Workflow And Monitoring
-
-- 自动监控企业新闻、融资、工商变更、诉讼风险、招股书和公告更新。
 - Monitor company news, financing, registry changes, litigation risks, prospectuses, and announcements.
-
-- 对重要变化触发提醒、生成更新摘要或自动刷新相关章节。
 - Trigger alerts, generate update summaries, or refresh related report sections when important changes occur.
-
-- 支持定期企业跟踪报告、重点企业周报、招商项目看板和投资机会雷达。
 - Support periodic company tracking reports, weekly key-company updates, landing project dashboards, and investment opportunity radar.
 
-## 本地开发 / Local Development
+## Local Development
 
 ```bash
 npm install
 npm run dev
 ```
 
-前端 / Frontend:
+Frontend:
 
 ```text
 http://localhost:5173/
 ```
 
-后端 / Backend:
+Backend:
 
 ```text
 http://localhost:8787/
 ```
 
-## 校验 / Validation
+## Validation
 
 ```bash
 npm run check
 npm run build
 ```
 
-## 配置 / Configuration
+## Configuration
 
-模型配置在应用内完成。当前支持：
+Model settings are configured inside the app. The current backend supports:
 
 - DashScope / OpenAI-compatible chat completion APIs
 - Alibaba Cloud OpenSearch LLM text-generation endpoint
 
-Model settings are configured inside the app. The current backend supports DashScope/OpenAI-compatible APIs and Alibaba Cloud OpenSearch LLM.
-
-API Key 会保存在本地应用状态中，界面只显示脱敏信息。
-
 API keys are stored in local app state and only masked previews are shown in the UI.
 
-## 项目结构 / Project Structure
+## Project Structure
 
 ```text
-src/              React frontend / React 前端
-server/           Express backend and report generation logic / Express 后端与报告生成逻辑
-data/             Local app state / 本地应用状态
-uploads/          Uploaded source materials / 上传资料
-exports/          Generated Word files / 导出的 Word 文件
-public/           Static assets such as logo.svg / 静态资源
+src/              React frontend
+server/           Express backend and report generation logic
+data/             Local app state
+uploads/          Uploaded source materials
+exports/          Generated Word files
+public/           Static assets such as logo.svg
 ```
 
-## 注意事项 / Notes
+## License
 
-当前项目仍以本地使用为主。生成报告需要人工审核，尤其是公开资料不完整、来源冲突或标记为“待核实”的内容。
+This project is licensed under the MIT License. See [LICENSE](LICENSE).
+
+## Notes
 
 This project is currently optimized for local use. Generated reports should be reviewed by humans, especially when public sources are incomplete, conflicting, or marked as pending verification.

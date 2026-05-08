@@ -1361,6 +1361,24 @@ function extractOpenSearchAnswer(payload) {
   throw new Error("OpenSearch 未返回可解析的 answer。");
 }
 
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isTransientModelConnectionError(message = "") {
+  return /Connection reset|I\/O error|SocketException|InternalServerError|ECONNRESET|ETIMEDOUT|fetch failed|aborted/i.test(message);
+}
+
+function friendlyModelConnectionError(message = "") {
+  if (/Connection reset|I\/O error|SocketException/i.test(message)) {
+    return `OpenSearch 已收到请求，但其底层模型服务连接被重置。通常是 DashScope/模型服务临时网络抖动、OpenSearch 到模型服务的内部链路异常，或当前模型服务短时不可用。请稍后重试；如果持续出现，请检查 OpenSearch 应用绑定模型、地域和 DashScope 服务可用性。原始错误：${message.slice(0, 500)}`;
+  }
+  if (/InternalServerError/i.test(message)) {
+    return `OpenSearch 返回内部服务错误。请检查 OpenSearch 应用配置、模型名称、地域和模型服务可用性。原始错误：${message.slice(0, 500)}`;
+  }
+  return message;
+}
+
 async function callOpenSearchForSection(state, reportNode) {
   const { apiKey, openSearchHost, openSearchAppName, model } = state.settings.qwen;
   if (!apiKey) {
@@ -1744,34 +1762,56 @@ app.post("/api/settings/qwen/test", async (_req, res, next) => {
     if (state.settings.qwen.provider === "opensearch") {
       const { apiKey, openSearchHost, openSearchAppName, model } = state.settings.qwen;
       const endpoint = `${openSearchHost.replace(/\/$/, "")}/v3/openapi/workspaces/${encodeURIComponent(openSearchAppName)}/text-generation/${encodeURIComponent(model)}`;
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          messages: [
-            { role: "system", content: "只返回 JSON。" },
-            { role: "user", content: "{\"ok\":true}" }
-          ],
-          stream: false,
-          csi_level: "none",
-          parameters: { max_tokens: 64, temperature: 0.2 }
-        })
-      });
-      const text = await response.text();
-      let payload;
-      try {
-        payload = JSON.parse(text);
-      } catch {
-        throw new Error(`OpenSearch 返回非 JSON 内容：${text.slice(0, 200)}`);
+      let lastError = null;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const response = await fetchWithTimeout(endpoint, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${apiKey}`
+            },
+            body: JSON.stringify({
+              messages: [
+                { role: "system", content: "只返回严格 JSON，不要解释。" },
+                { role: "user", content: "{\"ok\":true}" }
+              ],
+              stream: false,
+              csi_level: "none",
+              parameters: { max_tokens: 32, temperature: 0 }
+            })
+          }, 15000);
+          const text = await response.text();
+          let payload;
+          try {
+            payload = JSON.parse(text);
+          } catch {
+            throw new Error(`OpenSearch 返回非 JSON 内容：${text.slice(0, 200)}`);
+          }
+          if (!response.ok || payload.code || (Array.isArray(payload.errors) && payload.errors.length > 0)) {
+            const detail = Array.isArray(payload.errors)
+              ? JSON.stringify(payload.errors)
+              : JSON.stringify({
+                  code: payload.code || response.status,
+                  message: payload.message || text.slice(0, 300),
+                  request_id: payload.request_id
+                });
+            throw new Error(detail);
+          }
+          res.json({ ok: true, sample: extractOpenSearchAnswer(payload).slice(0, 300), attempts: attempt });
+          return;
+        } catch (error) {
+          lastError = error;
+          const message = error instanceof Error ? error.message : String(error);
+          if (attempt < 3 && isTransientModelConnectionError(message)) {
+            await wait(700 * attempt);
+            continue;
+          }
+          break;
+        }
       }
-      if (!response.ok || (Array.isArray(payload.errors) && payload.errors.length > 0)) {
-        const detail = Array.isArray(payload.errors) ? JSON.stringify(payload.errors) : text;
-        throw new Error(`OpenSearch 连接测试失败：${detail.slice(0, 300)}`);
-      }
-      res.json({ ok: true, sample: extractOpenSearchAnswer(payload).slice(0, 300) });
+      const rawMessage = lastError instanceof Error ? lastError.message : String(lastError || "未知错误");
+      res.status(502).json({ message: `OpenSearch 连接测试失败：${friendlyModelConnectionError(rawMessage)}` });
       return;
     }
     const client = new OpenAI({

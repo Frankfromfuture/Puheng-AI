@@ -4,6 +4,8 @@ import {
   Briefcase,
   Building2,
   Check,
+  ChevronLeft,
+  ChevronRight,
   Clipboard,
   Database,
   Download,
@@ -17,8 +19,6 @@ import {
   MapPin,
   Maximize,
   Network,
-  PanelLeft,
-  PanelLeftClose,
   PlayCircle,
   Plus,
   Puzzle,
@@ -144,6 +144,7 @@ function confidenceLabel(score: number | undefined, status: SectionStatus): { te
 }
 
 type FlatNode = { node: ReportNode; level: number; parentId: string; numbering: string };
+type ModelHealth = "not_configured" | "checking" | "connected" | "failed";
 
 function flatten(nodes: ReportNode[], level = 1, parentId = "", prefix = ""): FlatNode[] {
   return nodes.flatMap((node, index) => {
@@ -359,25 +360,48 @@ export default function App() {
   const [exportLink, setExportLink] = useState("");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [modelHealth, setModelHealth] = useState<ModelHealth>("checking");
   const [genProgress, setGenProgress] = useState<{ current: string; index: number; total: number } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
     api
       .getState()
-      .then(setState)
-      .catch((error) => setMessage(error.message));
+      .then((next) => {
+        if (cancelled) return;
+        setState(next);
+        if (next.settings.qwen.apiKeyConfigured) {
+          setModelHealth("checking");
+          api
+            .testQwen()
+            .then(() => { if (!cancelled) setModelHealth("connected"); })
+            .catch(() => { if (!cancelled) setModelHealth("failed"); });
+        } else {
+          setModelHealth("not_configured");
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setModelHealth("failed");
+          setMessage(error.message);
+        }
+      });
+    return () => { cancelled = true; };
   }, []);
 
   const flatNodes = useMemo(() => (state ? flatten(state.framework) : []), [state]);
   const activeSection = state?.sections[activeSectionId];
   const activeNode = flatNodes.find((item) => item.node.id === activeSectionId)?.node;
-  const confirmedCount = state
-    ? Object.values(state.sections).filter((section) => section.status === "confirmed").length
-    : 0;
   const generatedCount = state
     ? flatNodes.filter(({ node }) => Boolean(generatedAnalysisBody(state.sections[node.id], node))).length
     : 0;
+  const modelHealthCopy: Record<ModelHealth, { label: string; cls: string; hint: string }> = {
+    not_configured: { label: "未配置", cls: "warn", hint: "请先在设置中保存模型 API Key" },
+    checking: { label: "检测中", cls: "muted", hint: "正在测试模型连接" },
+    connected: { label: "已联通", cls: "ok", hint: "模型连接测试成功" },
+    failed: { label: "未联通", cls: "warn", hint: "模型连接测试失败，点击重试" }
+  };
 
   async function withBusy<T>(label: string, action: () => Promise<T>) {
     setBusy(label);
@@ -413,7 +437,36 @@ export default function App() {
 
   async function saveSettings(payload: Partial<Settings> | Record<string, unknown>) {
     const saved = await withBusy("保存设置", () => api.patchSettings(payload));
-    if (saved) applyState(saved);
+    if (saved) {
+      applyState(saved);
+      const changedModelSettings = Object.prototype.hasOwnProperty.call(payload, "qwen");
+      if (changedModelSettings) {
+        setModelHealth(saved.settings.qwen.apiKeyConfigured ? "checking" : "not_configured");
+      }
+      if (changedModelSettings && saved.settings.qwen.apiKeyConfigured) {
+        api
+          .testQwen()
+          .then(() => setModelHealth("connected"))
+          .catch(() => setModelHealth("failed"));
+      }
+    }
+  }
+
+  async function retestModelConnection() {
+    if (!state?.settings.qwen.apiKeyConfigured) {
+      setModelHealth("not_configured");
+      setMessage("请先在设置中保存模型 API Key。");
+      return;
+    }
+    setModelHealth("checking");
+    try {
+      await api.testQwen();
+      setModelHealth("connected");
+      setMessage("模型连接测试成功。");
+    } catch (error) {
+      setModelHealth("failed");
+      setMessage(error instanceof Error ? error.message : "模型连接测试失败。");
+    }
   }
 
   async function saveSection(id: string, patch: Partial<AnalysisSection>) {
@@ -653,28 +706,29 @@ export default function App() {
             <SettingsIcon size={18} /> {!sidebarCollapsed && "设置"}
           </button>
         </nav>
-        {!sidebarCollapsed && (
-          <>
-            <div className="sidebar-card">
+        <div className="sidebar-bottom">
+          {!sidebarCollapsed && (
+            <button
+              className={`sidebar-model-status ${modelHealthCopy[modelHealth].cls}`}
+              onClick={retestModelConnection}
+              title={modelHealthCopy[modelHealth].hint}
+            >
               <span>模型状态</span>
-              <strong className={state.settings.qwen.apiKeyConfigured ? "ok" : "warn"}>
-                {state.settings.qwen.apiKeyConfigured ? "已配置" : "未配置"}
-              </strong>
-              <p>{state.settings.qwen.provider === "opensearch" ? "OpenSearch" : "DashScope"} · {state.settings.qwen.model}</p>
-            </div>
-            <div className="sidebar-card">
-              <span>已确认章节</span>
-              <strong>{confirmedCount}</strong>
-              <p>Word 只收录已确认内容</p>
-            </div>
-          </>
-        )}
+              <strong>{modelHealthCopy[modelHealth].label}</strong>
+              <small>{state.settings.qwen.provider === "opensearch" ? "OpenSearch" : "DashScope"} · {state.settings.qwen.model}</small>
+            </button>
+          )}
+          <div className="sidebar-meta">
+            <span>GitHub v0.8</span>
+            {!sidebarCollapsed && <p>developed by frankfromfuture</p>}
+          </div>
+        </div>
         <button
-          className="sidebar-toggle"
+          className="sidebar-edge-toggle"
           onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
           title={sidebarCollapsed ? "展开侧边栏" : "收起侧边栏"}
         >
-          {sidebarCollapsed ? <PanelLeft size={16} /> : <PanelLeftClose size={16} />}
+          {sidebarCollapsed ? <ChevronRight size={13} /> : <ChevronLeft size={13} />}
         </button>
       </aside>
 
@@ -751,7 +805,10 @@ export default function App() {
             saveSettings={saveSettings}
             testQwen={async () => {
               const result = await withBusy("测试模型", () => api.testQwen());
-              if (result) setMessage("模型连接测试成功。");
+              if (result) {
+                setModelHealth("connected");
+                setMessage("模型连接测试成功。");
+              }
             }}
           />
         )}
@@ -1468,6 +1525,46 @@ function SettingsView({
           </>
         )}
       />
+
+      <div className="panel about-panel">
+        <div className="panel-title">
+          <span>About</span>
+          <Sparkles size={18} />
+        </div>
+        <div className="about-content">
+          <section>
+            <h3>产品功能</h3>
+            <p>
+              清大浦恒 AI 是面向企业研究、投资判断、招商落地、资本合作和资源赋能的企业智能分析平台。系统将分散的公开资料、人工经验和业务判断组织成可编辑、可追溯、可推理、可输出的企业知识网络，帮助用户判断一家公司是谁、为什么重要、与我们有什么关系、能如何合作、风险在哪里。
+            </p>
+          </section>
+          <section>
+            <h3>版本路线图</h3>
+            <ul>
+              <li>0.8：本地工作台，完成分析框架、章节生成、报告预览、Word 导出、移动端适配、模型联通检测和 MIT 开源协议。</li>
+              <li>1.0：单机正式版，强化章节搜索、来源追踪、提示词体系、报告质量控制、导出模板和新增章节生成稳定性。</li>
+              <li>2.0：云端访问版，支持服务器部署、域名、HTTPS、日志、备份、文件存储和安全配置。</li>
+              <li>3.0：多用户数据库版，接入企业数据库、报告版本、用户组织、角色权限、审核确认和操作日志。</li>
+              <li>4.0：企业知识库版，沉淀工商、融资、股东、团队、财务、客户、供应商、风险和合作记录，并与分析报告联动。</li>
+              <li>5.0：企业立体关联分析版，建设企业、人物、机构、基金、园区、政府平台关系图谱，支撑知识抽取、路径分析、风险穿透和跨实体推理。</li>
+              <li>6.0+：智能工作流与自动监控，跟踪企业新闻、融资、工商变更、招股书和公告更新。</li>
+            </ul>
+          </section>
+          <section>
+            <h3>开发者与 GitHub 开源</h3>
+            <p>GitHub 版本：0.8</p>
+            <p>developed by frankfromfuture</p>
+            <p>项目代码通过 GitHub 仓库管理，后续可按开源项目方式持续迭代、部署和协作。</p>
+            <p>协议：MIT License。</p>
+            <p>
+              链接：
+              <a href="https://github.com/Frankfromfuture/Puheng-AI" target="_blank" rel="noreferrer">
+                github.com/Frankfromfuture/Puheng-AI
+              </a>
+            </p>
+          </section>
+        </div>
+      </div>
     </section>
   );
 }
