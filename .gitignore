@@ -1,0 +1,8 @@
+node_modules/
+dist/
+data/app-state.json
+uploads/*
+exports/*
+*.tsbuildinfo
+.playwright-cli/
+output/
