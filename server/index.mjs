@@ -374,7 +374,10 @@ function defaultState() {
       citation("source-public-disclosure", "上市公司公告/年报", "公开披露", "公告/年报/财务要点"),
       citation("source-capital-news", "行业与资本新闻", "公开新闻", "资本合作分析"),
       citation("source-registry", "工商与负面信息公开来源", "工商/监管", "基础信息速览")
-    ]
+    ],
+    promptEngineering: {
+      globalStyle: ""
+    }
   };
 }
 
@@ -403,7 +406,65 @@ async function writeState(state) {
   await fs.writeFile(STATE_FILE, JSON.stringify(state, null, 2), "utf8");
 }
 
+
+const DEFAULT_GLOBAL_STYLE = `报告生成时须严格遵循以下风格要求：
+1. 简称原则：企业名称首次出现后全文使用简称，不重复完整名称。
+2. 信息时效：所有数据与判断以生成日为基准，仅引用最新可查公开信息；引用历史数据须标注时间节点。
+3. 分析视角：面向投资人与资源整合者，站在"为企业创造可落地价值"的角度，客观评估合作与投资策略，不做主观情感性表达。
+4. 文风：简练不啰嗦，避免铺垫与重复。禁止出现"我""你"等口语词汇，禁止推销性语言。
+5. 段落结构：长内容须分段，段落不宜过散；并列要点可分点，单点不宜过短（每点至少一句有效信息）。
+6. 结论先行：每段首句为该段核心结论短句，后续句作支撑与展开。
+7. 一级标题摘要：每个一级标题章节首段须为2-3句极简结论，凝练本章核心判断，供快速阅读。`;
+
+const DEFAULT_NODE_NOTES = {
+  "business-registration": "核实注册资本、实控人身份与股权穿透。历史沿革简述变更要点。不可查项进入待核实，禁止推测。",
+  "shareholding": "列出前十大股东（穿透后）、一致行动人与重要股权质押/冻结。标注各方属性（产业/财务/国资）。",
+  "filings-finance": "聚焦近三年营收、毛利率与净利润趋势。标注数据来源与报告期，重点异常须简要解释。",
+  "negative-info": "列出司法、监管、舆情类负面记录，标注影响程度（重大/一般/关注）。无信息须明确说明，禁止留空。",
+  "industry-chain-position": "明确产业链层级与核心供给环节，分析对上下游的议价权强弱。",
+  "competitors": "列出3-5家主要竞争对手，从规模、技术与市场三维度简要对比，突出目标企业差异化定位。",
+  "competitive-advantages": "从技术壁垒、资质、客户粘性、品牌四维度识别竞争优势，须有可核实依据，禁止泛化表述。",
+  "upstream-downstream": "列出主要客户（如公开则含前五名）与核心供应商，分析集中度风险与关系稳定性。",
+  "recent-capital-news": "梳理近12个月融资事件、股权变动及股东增减持。无信息须明确说明。",
+  "financing-history": "梳理历次融资轮次、时间节点与领投机构（金额公开者列出），识别资本偏好与融资节奏。",
+  "valuation-rounds": "仅引用公开或可推算的估值数据，不确定项标注「估算」并进入待核实，禁止编造数字。",
+  "major-investors": "区分财务型与战略型投资者，重点标注知名机构与产业方背景，分析其与企业的战略关系。",
+  "fund-contribution": "核查企业或实控人是否设立或出资产业基金，分析资本运作意图与LP构成。无记录须说明。",
+  "cooperation-fund": "结合我方资源与企业资本需求，评估共设产业基金的可行性、切入时机与结构设计要点。",
+  "capital-cooperation-advice": "输出1-3条优先级排序的资本合作路径，每条须含具体切入建议与风险提示。",
+  "enterprise-needs": "从增长瓶颈、战略短板与资源缺口三维度识别3-5个核心需求，排除伪需求。",
+  "resource-match": "将我方强资源与企业需求逐条交叉匹配，标注匹配强度（强/中/弱）与匹配逻辑。",
+  "cooperation-priority": "综合匹配度与可落地性，输出优先推进的1-3个合作方向并说明优先级理由。",
+  "next-actions": "输出90天内可启动的具体行动清单，每项须明确负责方、预期产出与推进条件。",
+  "region-match": "将企业业务与我方重点落地区域交叉分析，识别高匹配区域并从政策、产业、空间三方面说明理由。",
+  "investment-attraction": "评估企业符合哪类招商引资政策，结合产业偏好与税收贡献潜力给出可落地路径。",
+  "land-cooperation": "分析企业土地使用需求，评估合作拿地的可行路径与谈判要点。",
+  "leasing-landing": "识别适合租赁落地的场景（研发/运营/仓储），匹配我方园区资源，给出优先选址建议。",
+  "landing-fund": "结合落地区域政府引导基金政策，评估联合设立专项基金的条件与投资范围。",
+  "ninety-day-plan": "输出从初步接触到签约意向的90天行动路径，含关键里程碑、决策节点与所需资源。",
+  "risks": "列出影响合作与投资决策的关键风险（经营/财务/法律/竞争）及信息缺口，标注优先级与核实建议。",
+  "citation-appendix": "列出本报告所引用的全部来源，格式：序号、名称、类型、关键引用内容摘要。"
+};
+
+const DEFAULT_RESOURCE_NOTES = {
+  "tsinghua-companies": "分析目标企业与清华系生态的协同点，包括技术对接、客户引荐、校友网络等合作可能，给出优先匹配方向。",
+  "shanghai-soe": "评估目标企业与上海国央企的合作机会，识别供应链、战略合作或资本层面的切入点。",
+  "shanghai-medical": "分析目标企业产品/服务在上海医疗系统的应用场景与落地路径，明确切入科室或机构。",
+  "qingpu": "评估目标企业落地青浦的可行性，结合青浦产业政策、园区资源与企业需求进行交叉分析。",
+  "longhua": "评估目标企业落地龙华的可行性，结合龙华制造业升级政策与企业供应链布局进行交叉分析。",
+  "qingpu-region": "结合青浦区重点招商产业方向与企业业务特征，评估落地可行性与政策匹配度。",
+  "longhua-region": "结合龙华区产业升级重点与企业供应链布局，评估落地可行性与空间资源匹配。",
+  "attraction": "分析企业招商引资的适配性，结合业务规模、税收贡献与就业带动潜力评估可行性。",
+  "land": "结合企业空间需求与我方区域合作资源，评估合作拿地的优先度与谈判策略。",
+  "lease": "分析租赁落地的优先场景（写字楼/产业园/仓储），结合企业阶段性需求给出建议。",
+  "coop-fund": "评估与目标企业联合设立专项产业基金的条件，包括规模、LP结构与投资范围。",
+  "industry-fund": "分析对目标企业进行产业基金直投的条件（估值区间、轮次匹配、退出路径）。",
+  "medical": "分析目标企业产品/技术在医疗系统的场景适配，识别具体合作切入科室或机构。",
+  "soe": "评估目标企业与国央企开展战略合作的可能性，识别供应链引荐、联合项目或资本层面的机会。"
+};
+
 function migrateState(state) {
+
   let changed = false;
   state.project ??= {};
   if (!state.project.researchRequirement) {
@@ -427,6 +488,31 @@ function migrateState(state) {
       }
     }
     state.meta.blankDefaultAnnotationsV1 = true;
+    changed = true;
+  }
+  // Migrate: add promptEngineering with defaults
+  if (!state.meta.promptEngineeringV1) {
+    state.promptEngineering ??= {};
+    if (!state.promptEngineering.globalStyle) {
+      state.promptEngineering.globalStyle = DEFAULT_GLOBAL_STYLE;
+    }
+    // Set default notes on framework nodes only if currently empty
+    walk(state.framework ?? [], (node) => {
+      if (!node.notes && DEFAULT_NODE_NOTES[node.id]) {
+        node.notes = DEFAULT_NODE_NOTES[node.id];
+      }
+    });
+    // Set default notes on resources only if currently empty
+    for (const item of state.settings?.strongResources ?? []) {
+      if (!item.notes && DEFAULT_RESOURCE_NOTES[item.id]) item.notes = DEFAULT_RESOURCE_NOTES[item.id];
+    }
+    for (const item of state.settings?.landingRegions ?? []) {
+      if (!item.notes && DEFAULT_RESOURCE_NOTES[item.id]) item.notes = DEFAULT_RESOURCE_NOTES[item.id];
+    }
+    for (const item of state.settings?.landingMethods ?? []) {
+      if (!item.notes && DEFAULT_RESOURCE_NOTES[item.id]) item.notes = DEFAULT_RESOURCE_NOTES[item.id];
+    }
+    state.meta.promptEngineeringV1 = true;
     changed = true;
   }
   return changed;
@@ -550,7 +636,12 @@ function buildSectionPrompt(state, reportNode) {
     {
       role: "system",
       content:
-        "你是严谨的企业公开资料与资本合作分析助手。必须基于用户上传资料、外部检索结果和已列明来源作答。禁止编造事实、融资金额、估值、股东、公告或负面信息。没有来源的内容只能写入 missingInfo 或待核实，不能写成确定事实。只返回严格 JSON，不要 Markdown，不要解释 JSON 以外的内容。"
+        `你是严谨的企业公开资料与资本合作分析助手。必须基于用户上传资料、外部检索结果和已列明来源作答。禁止编造事实、融资金额、估值、股东、公告或负面信息。没有来源的内容只能写入 missingInfo 或待核实，不能写成确定事实。只返回严格 JSON，不要 Markdown，不要解释 JSON 以外的内容。
+
+报告全局风格要求（必须严格遵守）：
+${
+            (state.promptEngineering?.globalStyle || DEFAULT_GLOBAL_STYLE).trim()
+          }`
     },
     {
       role: "user",
@@ -1009,6 +1100,16 @@ app.post("/api/sections/:id/unlock", async (req, res) => {
   section.status = "needs_review";
   reportNode.locked = false;
   reportNode.status = "needs_review";
+  await writeState(state);
+  res.json(publicState(state));
+});
+
+app.patch("/api/prompt-engineering", async (req, res) => {
+  const state = await readState();
+  state.promptEngineering ??= {};
+  if (typeof req.body?.globalStyle === "string") {
+    state.promptEngineering.globalStyle = req.body.globalStyle;
+  }
   await writeState(state);
   res.json(publicState(state));
 });

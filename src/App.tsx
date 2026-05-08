@@ -29,7 +29,7 @@ import {
   Upload,
   Zap
 } from "lucide-react";
-import { ChangeEvent, DragEvent, ReactNode, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, DragEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import type {
   AnalysisDepth,
   AnalysisSection,
@@ -37,6 +37,7 @@ import type {
   ExternalApiSetting,
   LandingMethod,
   LandingRegion,
+  PromptEngineering,
   ReportNode,
   ResearchRequirement,
   SectionStatus,
@@ -80,6 +81,9 @@ const api = {
   },
   async exportDocx(): Promise<{ filename: string; url: string }> {
     return request("/api/export/docx", { method: "POST" });
+  },
+  async patchPromptEngineering(payload: Partial<PromptEngineering>): Promise<AppState> {
+    return request("/api/prompt-engineering", { method: "PATCH", body: JSON.stringify(payload) });
   }
 };
 
@@ -216,7 +220,7 @@ function depthClass(depth: AnalysisDepth) {
 
 export default function App() {
   const [state, setState] = useState<AppState | null>(null);
-  const [activeView, setActiveView] = useState<"dashboard" | "settings" | "files">("dashboard");
+  const [activeView, setActiveView] = useState<"dashboard" | "settings" | "files" | "prompts">("dashboard");
   const [activeSectionId, setActiveSectionId] = useState("capital-cooperation");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState("");
@@ -227,6 +231,7 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [genProgress, setGenProgress] = useState<{ current: string; index: number; total: number } | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     api
@@ -305,16 +310,25 @@ export default function App() {
     if (saved) applyState(saved);
   }
 
+  function pauseGeneration() {
+    abortRef.current?.abort();
+  }
+
   async function generateReport() {
     if (!state?.settings.qwen.apiKeyConfigured) {
       setMessage("请先在设置菜单配置模型 API Key 并测试连接。");
       return;
     }
+    const controller = new AbortController();
+    abortRef.current = controller;
     setGenerating(true);
     setMessage("");
     setGenProgress(null);
     try {
-      const response = await fetch("/api/report/generate", { method: "POST" });
+      const response = await fetch("/api/report/generate", {
+        method: "POST",
+        signal: controller.signal
+      });
       if (!response.ok || !response.body) {
         const err = await response.json().catch(() => ({}));
         setMessage(err.message || "生成失败。");
@@ -338,7 +352,6 @@ export default function App() {
               setGenProgress({ current: "", index: 0, total: event.total });
             } else if (event.type === "generating") {
               setGenProgress({ current: event.title, index: event.index + 1, total: event.total });
-              // Optimistically mark section as generating in UI
               setState((prev) => {
                 if (!prev) return prev;
                 return {
@@ -350,7 +363,6 @@ export default function App() {
                 };
               });
             } else if (event.type === "section") {
-              // Merge the completed section into state
               setState((prev) => {
                 if (!prev) return prev;
                 return {
@@ -373,14 +385,25 @@ export default function App() {
         }
       }
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "网络错误，请重试。");
+      if (err instanceof Error && err.name === "AbortError") {
+        setMessage("已暂停生成。");
+      } else {
+        setMessage(err instanceof Error ? err.message : "网络错误，请重试。");
+      }
     } finally {
+      abortRef.current = null;
       setGenerating(false);
       setGenProgress(null);
     }
   }
 
+  async function savePromptEngineering(payload: Partial<PromptEngineering>) {
+    const saved = await withBusy("\u4fdd\u5b58\u63d0\u793a\u8bcd", () => api.patchPromptEngineering(payload));
+    if (saved) applyState(saved);
+  }
+
   async function exportDocx() {
+
     const result = await withBusy("生成 Word", () => api.exportDocx());
     if (result) {
       setExportLink(result.url);
@@ -412,6 +435,9 @@ export default function App() {
         <nav>
           <button className={activeView === "dashboard" ? "active" : ""} onClick={() => setActiveView("dashboard")} title="工作台">
             <Layers3 size={18} /> {!sidebarCollapsed && "工作台"}
+          </button>
+          <button className={activeView === "prompts" ? "active" : ""} onClick={() => setActiveView("prompts")} title="提示词工程">
+            <SlidersHorizontal size={18} /> {!sidebarCollapsed && "提示词工程"}
           </button>
           <button className={activeView === "files" ? "active" : ""} onClick={() => setActiveView("files")} title="资料库">
             <Upload size={18} /> {!sidebarCollapsed && "资料库"}
@@ -478,6 +504,7 @@ export default function App() {
             saveSection={saveSection}
             generateSection={generateSection}
             generateReport={generateReport}
+            pauseGeneration={pauseGeneration}
             confirmSection={confirmSection}
             unlockSection={unlockSection}
             busy={busy}
@@ -512,7 +539,18 @@ export default function App() {
             }}
           />
         )}
+
+        {activeView === "prompts" && (
+          <PromptEngineeringView
+            state={state}
+            flatNodes={flatNodes}
+            savePromptEngineering={savePromptEngineering}
+            saveFramework={saveFramework}
+            saveSettings={saveSettings}
+          />
+        )}
       </main>
+
     </div>
   );
 }
@@ -529,6 +567,7 @@ interface DashboardProps {
   saveSection: (id: string, patch: Partial<AnalysisSection>) => Promise<void>;
   generateSection: (id: string) => Promise<void>;
   generateReport: () => Promise<void>;
+  pauseGeneration: () => void;
   confirmSection: (id: string) => Promise<void>;
   unlockSection: (id: string) => Promise<void>;
   busy: string;
@@ -549,6 +588,7 @@ function Dashboard(props: DashboardProps) {
     saveSection,
     generateSection,
     generateReport,
+    pauseGeneration,
     confirmSection,
     unlockSection,
     busy,
@@ -639,13 +679,13 @@ function Dashboard(props: DashboardProps) {
               </span>
             )}
             <button
-              className="button gen-report-btn"
-              onClick={generateReport}
-              disabled={generating || Boolean(busy)}
-              title="根据报告框架与资源条件生成完整分析报告"
+              className={`button gen-report-btn ${generating ? "pausing" : ""}`}
+              onClick={generating ? pauseGeneration : generateReport}
+              disabled={!generating && Boolean(busy)}
+              title={generating ? "点击暂停生成" : "根据报告框架与资源条件生成完整分析报告"}
             >
               <PlayCircle size={15} />
-              {generating ? "生成中..." : "生成分析报告"}
+              {generating ? "暂停生成" : "生成分析报告"}
             </button>
           </div>
         </div>
@@ -1132,6 +1172,104 @@ function EditableList<T extends { id: string; name: string }>({
           <div className="settings-row" key={item.id}>{render(item)}</div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function PromptTextarea({ label, value, onSave }: { label: string; value: string; onSave: (v: string) => void }) {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
+  return (
+    <div className="prompt-field">
+      <div className="prompt-field-label">{label}</div>
+      <textarea
+        className="prompt-textarea"
+        value={draft}
+        rows={4}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => { if (draft !== value) onSave(draft); }}
+      />
+    </div>
+  );
+}
+
+function PromptEngineeringView({
+  state, flatNodes, savePromptEngineering, saveFramework, saveSettings
+}: {
+  state: AppState;
+  flatNodes: FlatNode[];
+  savePromptEngineering: (p: Partial<PromptEngineering>) => Promise<void>;
+  saveFramework: (f: ReportNode[]) => Promise<void>;
+  saveSettings: (p: Partial<Settings> | Record<string, unknown>) => Promise<void>;
+}) {
+  const level1Nodes = flatNodes.filter(({ level }) => level === 1);
+  function saveNodeNote(id: string, notes: string) {
+    saveFramework(updateNode(state.framework, id, { notes }));
+  }
+  function saveResNote(key: "strongResources" | "landingRegions" | "landingMethods", id: string, notes: string) {
+    const list = (state.settings[key] as Array<{ id: string; notes?: string; [k: string]: unknown }>)
+      .map(item => item.id === id ? { ...item, notes } : item);
+    saveSettings({ [key]: list });
+  }
+  return (
+    <div className="prompt-view">
+      <div className="prompt-view-header">
+        <h2>提示词工程</h2>
+        <p>全局风格与各章节、各资源合作点的生成提示词。失焦自动保存，AI 生成时严格遵循。</p>
+      </div>
+      <section className="prompt-section">
+        <div className="prompt-section-title">全局风格要求</div>
+        <PromptTextarea
+          label="适用于所有章节的文风、结构与视角要求"
+          value={state.promptEngineering?.globalStyle ?? ""}
+          onSave={(v) => savePromptEngineering({ globalStyle: v })}
+        />
+      </section>
+      <section className="prompt-section">
+        <div className="prompt-section-title">报告章节提示词</div>
+        {level1Nodes.map(({ node: l1, numbering: n1 }) => {
+          const children = flatNodes.filter(({ node: l2, level }) =>
+            level === 2 && state.framework.some(top =>
+              top.id === l1.id && (top.children ?? []).some(c => c.id === l2.id)));
+          return (
+            <div key={l1.id} className="prompt-chapter-group">
+              <div className="prompt-chapter-label">{n1}&nbsp;&nbsp;{l1.title}</div>
+              {children.length > 0
+                ? children.map(({ node: l2, numbering: n2 }) => (
+                    <PromptTextarea key={l2.id} label={`${n2}  ${l2.title}`}
+                      value={l2.notes ?? ""} onSave={(v) => saveNodeNote(l2.id, v)} />
+                  ))
+                : <PromptTextarea label={`${n1}  ${l1.title}`}
+                    value={l1.notes ?? ""} onSave={(v) => saveNodeNote(l1.id, v)} />
+              }
+            </div>
+          );
+        })}
+      </section>
+      <section className="prompt-section">
+        <div className="prompt-section-title">资源与落地要点提示词</div>
+        <div className="prompt-chapter-group">
+          <div className="prompt-chapter-label">我方强资源</div>
+          {state.settings.strongResources.filter(r => r.enabled).map(r => (
+            <PromptTextarea key={r.id} label={r.name} value={r.notes ?? ""}
+              onSave={(v) => saveResNote("strongResources", r.id, v)} />
+          ))}
+        </div>
+        <div className="prompt-chapter-group">
+          <div className="prompt-chapter-label">重点落地区域</div>
+          {state.settings.landingRegions.filter(r => r.enabled).map(r => (
+            <PromptTextarea key={r.id} label={r.name} value={r.notes ?? ""}
+              onSave={(v) => saveResNote("landingRegions", r.id, v)} />
+          ))}
+        </div>
+        <div className="prompt-chapter-group">
+          <div className="prompt-chapter-label">落地方式</div>
+          {state.settings.landingMethods.filter(m => m.enabled).map(m => (
+            <PromptTextarea key={m.id} label={m.name} value={m.notes ?? ""}
+              onSave={(v) => saveResNote("landingMethods", m.id, v)} />
+          ))}
+        </div>
+      </section>
     </div>
   );
 }

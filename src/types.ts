@@ -119,6 +119,10 @@ export interface Project {
   description: string;
 }
 
+export interface PromptEngineering {
+  globalStyle: string;
+}
+
 export interface AppState {
   project: Project;
   settings: Settings;
@@ -126,5 +130,6 @@ export interface AppState {
   sections: Record<string, AnalysisSection>;
   files: UploadedFile[];
   sources: Citation[];
+  promptEngineering: PromptEngineering;
   meta?: Record<string, boolean | string | number>;
 }
