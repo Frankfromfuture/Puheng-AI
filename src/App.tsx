@@ -1,5 +1,8 @@
 import {
   Archive,
+  BarChart3,
+  Briefcase,
+  Building2,
   Check,
   Download,
   FileText,
@@ -9,7 +12,12 @@ import {
   Layers3,
   Lock,
   MapPin,
+  Maximize,
+  PanelLeft,
+  PanelLeftClose,
+  PlayCircle,
   Plus,
+  Puzzle,
   RefreshCcw,
   Save,
   Settings as SettingsIcon,
@@ -18,7 +26,8 @@ import {
   Target,
   Trash2,
   Unlock,
-  Upload
+  Upload,
+  Zap
 } from "lucide-react";
 import { ChangeEvent, DragEvent, ReactNode, useEffect, useMemo, useState } from "react";
 import type {
@@ -87,13 +96,13 @@ async function request<T>(url: string, init: RequestInit = {}): Promise<T> {
 
 const depthOptions: AnalysisDepth[] = ["简版", "标准", "深入", "专项"];
 
-const requirementOptions: Array<{ id: ResearchRequirement; label: string; focus: string }> = [
-  { id: "brief", label: "简要分析", focus: "所有框架均简单分析" },
-  { id: "fundamental", label: "基本面深度分析", focus: "企业基本面深入，其余相应变化" },
-  { id: "investment", label: "投资合作分析", focus: "产业分析与资本分析重点" },
-  { id: "landing", label: "招商落地分析", focus: "产业分析与区域交叉分析重点" },
-  { id: "enablement", label: "赋能合作分析", focus: "资源复合与赋能分析重点" },
-  { id: "comprehensive", label: "全面分析", focus: "所有重点展开" }
+const requirementOptions: Array<{ id: ResearchRequirement; label: string; shortLabel: string; focus: string; icon: typeof Zap }> = [
+  { id: "brief", label: "简要分析", shortLabel: "简要", focus: "所有框架均简单分析", icon: Zap },
+  { id: "fundamental", label: "基本面深度分析", shortLabel: "基本面", focus: "企业基本面深入，其余相应变化", icon: BarChart3 },
+  { id: "investment", label: "投资合作分析", shortLabel: "投资", focus: "产业分析与资本分析重点", icon: Briefcase },
+  { id: "landing", label: "招商落地分析", shortLabel: "招商", focus: "产业分析与区域交叉分析重点", icon: Building2 },
+  { id: "enablement", label: "赋能合作分析", shortLabel: "赋能", focus: "资源复合与赋能分析重点", icon: Puzzle },
+  { id: "comprehensive", label: "全面分析", shortLabel: "全面", focus: "所有重点展开", icon: Maximize }
 ];
 
 const statusText: Record<SectionStatus, string> = {
@@ -112,13 +121,27 @@ const statusClass: Record<SectionStatus, string> = {
   insufficient: "warning"
 };
 
-type FlatNode = { node: ReportNode; level: number; parentId: string };
+function confidenceLabel(score: number | undefined, status: SectionStatus): { text: string; cls: string } {
+  if (status === "generating") return { text: "生成中", cls: "working" };
+  if (status === "confirmed") return { text: "已确认", cls: "confirmed" };
+  if (score === undefined || score === 0) return { text: "-", cls: "muted" };
+  if (score >= 85) return { text: "极高", cls: "confirmed" };
+  if (score >= 65) return { text: "高", cls: "review" };
+  if (score >= 45) return { text: "中", cls: "standard-conf" };
+  if (score >= 25) return { text: "低", cls: "warning" };
+  return { text: "极低", cls: "warning" };
+}
 
-function flatten(nodes: ReportNode[], level = 1, parentId = ""): FlatNode[] {
-  return nodes.flatMap((node) => [
-    { node, level, parentId },
-    ...flatten(node.children, level + 1, node.id)
-  ]);
+type FlatNode = { node: ReportNode; level: number; parentId: string; numbering: string };
+
+function flatten(nodes: ReportNode[], level = 1, parentId = "", prefix = ""): FlatNode[] {
+  return nodes.flatMap((node, index) => {
+    const num = prefix ? `${prefix}.${index + 1}` : `${index + 1}`;
+    return [
+      { node, level, parentId, numbering: num },
+      ...flatten(node.children, level + 1, node.id, num)
+    ];
+  });
 }
 
 function updateNode(nodes: ReportNode[], id: string, patch: Partial<ReportNode>): ReportNode[] {
@@ -201,6 +224,9 @@ export default function App() {
   const [apiKeyDraft, setApiKeyDraft] = useState("");
   const [uploadCategory, setUploadCategory] = useState("企业资料");
   const [exportLink, setExportLink] = useState("");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [genProgress, setGenProgress] = useState<{ current: string; index: number; total: number } | null>(null);
 
   useEffect(() => {
     api
@@ -279,6 +305,81 @@ export default function App() {
     if (saved) applyState(saved);
   }
 
+  async function generateReport() {
+    if (!state?.settings.qwen.apiKeyConfigured) {
+      setMessage("请先在设置菜单配置模型 API Key 并测试连接。");
+      return;
+    }
+    setGenerating(true);
+    setMessage("");
+    setGenProgress(null);
+    try {
+      const response = await fetch("/api/report/generate", { method: "POST" });
+      if (!response.ok || !response.body) {
+        const err = await response.json().catch(() => ({}));
+        setMessage(err.message || "生成失败。");
+        return;
+      }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith("data:")) continue;
+          try {
+            const event = JSON.parse(trimmed.slice(5).trim());
+            if (event.type === "start") {
+              setGenProgress({ current: "", index: 0, total: event.total });
+            } else if (event.type === "generating") {
+              setGenProgress({ current: event.title, index: event.index + 1, total: event.total });
+              // Optimistically mark section as generating in UI
+              setState((prev) => {
+                if (!prev) return prev;
+                return {
+                  ...prev,
+                  sections: {
+                    ...prev.sections,
+                    [event.id]: { ...prev.sections[event.id], status: "generating" as SectionStatus }
+                  }
+                };
+              });
+            } else if (event.type === "section") {
+              // Merge the completed section into state
+              setState((prev) => {
+                if (!prev) return prev;
+                return {
+                  ...prev,
+                  sections: { ...prev.sections, [event.id]: event.section }
+                };
+              });
+            } else if (event.type === "section_error") {
+              setMessage(`「${event.title}」生成失败：${event.message}`);
+            } else if (event.type === "done") {
+              setState(event.state);
+              setGenProgress(null);
+              setMessage("分析报告已全部生成完成。");
+            } else if (event.type === "error") {
+              setMessage(event.message);
+            }
+          } catch {
+            // ignore parse errors on partial lines
+          }
+        }
+      }
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "网络错误，请重试。");
+    } finally {
+      setGenerating(false);
+      setGenProgress(null);
+    }
+  }
+
   async function exportDocx() {
     const result = await withBusy("生成 Word", () => api.exportDocx());
     if (result) {
@@ -297,38 +398,51 @@ export default function App() {
   }
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
+    <div className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+      <aside className={`sidebar ${sidebarCollapsed ? "collapsed" : ""}`}>
         <div className="brand">
           <div className="brand-mark">浦</div>
-          <div>
-            <strong>清大浦恒 AI</strong>
-            <span>企业公开资料与合作分析</span>
-          </div>
+          {!sidebarCollapsed && (
+            <div>
+              <strong>清大浦恒 AI</strong>
+              <span>企业公开资料与合作分析</span>
+            </div>
+          )}
         </div>
         <nav>
-          <button className={activeView === "dashboard" ? "active" : ""} onClick={() => setActiveView("dashboard")}>
-            <Layers3 size={18} /> 工作台
+          <button className={activeView === "dashboard" ? "active" : ""} onClick={() => setActiveView("dashboard")} title="工作台">
+            <Layers3 size={18} /> {!sidebarCollapsed && "工作台"}
           </button>
-          <button className={activeView === "files" ? "active" : ""} onClick={() => setActiveView("files")}>
-            <Upload size={18} /> 资料库
+          <button className={activeView === "files" ? "active" : ""} onClick={() => setActiveView("files")} title="资料库">
+            <Upload size={18} /> {!sidebarCollapsed && "资料库"}
           </button>
-          <button className={activeView === "settings" ? "active" : ""} onClick={() => setActiveView("settings")}>
-            <SettingsIcon size={18} /> 设置
+          <button className={activeView === "settings" ? "active" : ""} onClick={() => setActiveView("settings")} title="设置">
+            <SettingsIcon size={18} /> {!sidebarCollapsed && "设置"}
           </button>
         </nav>
-        <div className="sidebar-card">
-          <span>模型状态</span>
-          <strong className={state.settings.qwen.apiKeyConfigured ? "ok" : "warn"}>
-            {state.settings.qwen.apiKeyConfigured ? "已配置" : "未配置"}
-          </strong>
-          <p>{state.settings.qwen.provider === "opensearch" ? "OpenSearch" : "DashScope"} · {state.settings.qwen.model}</p>
-        </div>
-        <div className="sidebar-card">
-          <span>已确认章节</span>
-          <strong>{confirmedCount}</strong>
-          <p>Word 只收录已确认内容</p>
-        </div>
+        {!sidebarCollapsed && (
+          <>
+            <div className="sidebar-card">
+              <span>模型状态</span>
+              <strong className={state.settings.qwen.apiKeyConfigured ? "ok" : "warn"}>
+                {state.settings.qwen.apiKeyConfigured ? "已配置" : "未配置"}
+              </strong>
+              <p>{state.settings.qwen.provider === "opensearch" ? "OpenSearch" : "DashScope"} · {state.settings.qwen.model}</p>
+            </div>
+            <div className="sidebar-card">
+              <span>已确认章节</span>
+              <strong>{confirmedCount}</strong>
+              <p>Word 只收录已确认内容</p>
+            </div>
+          </>
+        )}
+        <button
+          className="sidebar-toggle"
+          onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+          title={sidebarCollapsed ? "展开侧边栏" : "收起侧边栏"}
+        >
+          {sidebarCollapsed ? <PanelLeft size={16} /> : <PanelLeftClose size={16} />}
+        </button>
       </aside>
 
       <main className="workspace">
@@ -354,9 +468,6 @@ export default function App() {
         {activeView === "dashboard" && (
           <Dashboard
             state={state}
-            activeSectionId={activeSectionId}
-            activeSection={activeSection}
-            activeNode={activeNode}
             flatNodes={flatNodes}
             dragId={dragId}
             setDragId={setDragId}
@@ -366,9 +477,12 @@ export default function App() {
             saveSettings={saveSettings}
             saveSection={saveSection}
             generateSection={generateSection}
+            generateReport={generateReport}
             confirmSection={confirmSection}
             unlockSection={unlockSection}
             busy={busy}
+            generating={generating}
+            genProgress={genProgress}
           />
         )}
 
@@ -405,9 +519,6 @@ export default function App() {
 
 interface DashboardProps {
   state: AppState;
-  activeSectionId: string;
-  activeSection?: AnalysisSection;
-  activeNode?: ReportNode;
   flatNodes: FlatNode[];
   dragId: string;
   setDragId: (id: string) => void;
@@ -417,17 +528,17 @@ interface DashboardProps {
   saveSettings: (payload: Partial<Settings> | Record<string, unknown>) => Promise<void>;
   saveSection: (id: string, patch: Partial<AnalysisSection>) => Promise<void>;
   generateSection: (id: string) => Promise<void>;
+  generateReport: () => Promise<void>;
   confirmSection: (id: string) => Promise<void>;
   unlockSection: (id: string) => Promise<void>;
   busy: string;
+  generating: boolean;
+  genProgress: { current: string; index: number; total: number } | null;
 }
 
 function Dashboard(props: DashboardProps) {
   const {
     state,
-    activeSectionId,
-    activeSection,
-    activeNode,
     flatNodes,
     dragId,
     setDragId,
@@ -437,9 +548,12 @@ function Dashboard(props: DashboardProps) {
     saveSettings,
     saveSection,
     generateSection,
+    generateReport,
     confirmSection,
     unlockSection,
-    busy
+    busy,
+    generating,
+    genProgress
   } = props;
 
   function patchNode(id: string, patch: Partial<ReportNode>) {
@@ -491,40 +605,54 @@ function Dashboard(props: DashboardProps) {
 
   return (
     <section className="dashboard-grid">
-      <div className="workspace-left">
-        <div className="panel project-panel command-panel">
-          <div className="panel-title">
-            <span>研究入口</span>
-            <Target size={18} />
+      {/* Row 1: Compact Research Entry */}
+      <div className="panel command-panel-compact">
+        <div className="command-compact-row">
+          <Target size={16} className="command-icon" />
+          <input
+            className="company-input"
+            value={state.project.companyName}
+            onChange={(event) => saveProject({ companyName: event.target.value })}
+            placeholder="输入公司名称"
+          />
+          <div className="requirement-pills" aria-label="研究要求">
+            {requirementOptions.map((option) => {
+              const Icon = option.icon;
+              return (
+                <button
+                  key={option.id}
+                  className={`req-pill ${state.project.researchRequirement === option.id ? "selected" : ""}`}
+                  onClick={() => saveProject({ researchRequirement: option.id })}
+                  title={`${option.label}：${option.focus}`}
+                >
+                  <Icon size={14} />
+                  <span>{option.shortLabel}</span>
+                </button>
+              );
+            })}
           </div>
-          <div className="command-row">
-            <Field label="公司名称" value={state.project.companyName} onChange={(companyName) => saveProject({ companyName })} />
-            <div className="model-token">
-              <span>当前模型</span>
-              <strong>{state.settings.qwen.model}</strong>
-            </div>
-          </div>
-          <div className="requirement-grid" aria-label="研究要求">
-            {requirementOptions.map((option) => (
-              <button
-                key={option.id}
-                className={state.project.researchRequirement === option.id ? "selected" : ""}
-                onClick={() => saveProject({ researchRequirement: option.id })}
-              >
-                <strong>{option.label}</strong>
-                <span>{option.focus}</span>
-              </button>
-            ))}
+          <div className="gen-report-area">
+            {genProgress && (
+              <span className="gen-progress">
+                {genProgress.index}/{genProgress.total}
+                {genProgress.current && <> · {genProgress.current}</>}
+              </span>
+            )}
+            <button
+              className="button gen-report-btn"
+              onClick={generateReport}
+              disabled={generating || Boolean(busy)}
+              title="根据报告框架与资源条件生成完整分析报告"
+            >
+              <PlayCircle size={15} />
+              {generating ? "生成中..." : "生成分析报告"}
+            </button>
           </div>
         </div>
+      </div>
 
-        <ResourcePanel
-          state={state}
-          updateItem={updateSettingItem}
-          addItem={addSettingItem}
-          removeItem={removeSettingItem}
-        />
-
+      {/* Row 2: Three columns — Framework | Resources | Preview */}
+      <div className="dashboard-body">
         <div className="panel framework-panel">
           <div className="panel-title">
             <span>报告框架图</span>
@@ -533,10 +661,10 @@ function Dashboard(props: DashboardProps) {
             </button>
           </div>
           <div className="tree">
-            {flatNodes.map(({ node, level }) => (
+            {flatNodes.map(({ node, level, numbering }) => (
               <div
                 key={node.id}
-                className={`tree-row ${activeSectionId === node.id ? "selected" : ""}`}
+                className={`tree-row`}
                 style={{ paddingLeft: `${(level - 1) * 22 + 10}px` }}
                 draggable
                 onDragStart={() => setDragId(node.id)}
@@ -553,6 +681,7 @@ function Dashboard(props: DashboardProps) {
                   onClick={(event) => event.stopPropagation()}
                   title="是否生成"
                 />
+                <span className="tree-numbering">{numbering}</span>
                 <input
                   className="tree-title"
                   value={node.title}
@@ -569,7 +698,7 @@ function Dashboard(props: DashboardProps) {
                     <option key={depth}>{depth}</option>
                   ))}
                 </select>
-                <span className={`status ${statusClass[node.status]}`}>{statusText[node.status]}</span>
+                {(() => { const conf = confidenceLabel(state.sections[node.id]?.confidenceScore, node.status); return <span className={`status ${conf.cls}`}>{conf.text}</span>; })()}
                 {node.locked && <Lock size={14} className="lock" />}
                 <button className="icon-button" onClick={(event) => { event.stopPropagation(); addSubsection(node.id); }} title="增加二级章节">
                   <Plus size={15} />
@@ -581,49 +710,49 @@ function Dashboard(props: DashboardProps) {
             ))}
           </div>
         </div>
-      </div>
 
-      <div className="panel section-panel brief-preview-panel">
-        {activeSection && activeNode ? (
-          <>
-            <div className="section-head">
-              <div>
-                <span>简报预览</span>
-                <h2>{activeSection.title}</h2>
-              </div>
-              <div className="section-actions">
-                {activeSection.locked ? (
-                  <button className="button ghost" onClick={() => unlockSection(activeSection.id)} disabled={Boolean(busy)}>
-                    <Unlock size={16} /> 解锁
-                  </button>
-                ) : (
-                  <>
-                    <button className="button ghost" onClick={() => generateSection(activeSection.id)} disabled={Boolean(busy)}>
-                      <RefreshCcw size={16} /> 模型生成
-                    </button>
-                    <button className="button primary" onClick={() => confirmSection(activeSection.id)} disabled={Boolean(busy)}>
-                      <Check size={16} /> 确认本节
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
+        <ResourcePanel
+          state={state}
+          updateItem={updateSettingItem}
+          addItem={addSettingItem}
+          removeItem={removeSettingItem}
+        />
 
-            <label className="body-editor preview-editor">
-              <textarea
-                value={activeSection.analysisText}
-                disabled={activeSection.locked}
-                onChange={(event) => saveSection(activeSection.id, { analysisText: event.target.value })}
-                placeholder="模型生成后可在这里微调；也可以先手工输入再确认。"
-              />
-            </label>
-          </>
-        ) : (
-          <div className="empty-state">
-            <Archive />
-            <p>请选择一个章节。</p>
+        <div className="panel report-preview-panel">
+          <div className="panel-title">
+            <span>分析报告预览</span>
+            <FileText size={18} />
           </div>
-        )}
+          <div className="report-preview-scroll">
+            {flatNodes.filter(({ node }) => node.enabled).length === 0 ? (
+              <div className="empty-state">
+                <Archive />
+                <p>暂无已启用的章节。</p>
+              </div>
+            ) : (
+              flatNodes
+                .filter(({ node }) => node.enabled)
+                .map(({ node, level, numbering }) => {
+                  const section = state.sections[node.id];
+                  const hasContent = section?.analysisText?.trim();
+                  const conf = confidenceLabel(section?.confidenceScore, node.status);
+                  return (
+                    <div key={node.id} className={`report-section level-${level}${level === 1 ? " level-1-divider" : ""}`}>
+                      <div className="report-section-head">
+                        <span className="report-numbering">{numbering}</span>
+                        <span className="report-title">{node.title}</span>
+                        <span className={`depth-badge ${depthClass(node.depth)}`}>{node.depth}</span>
+                        <span className={`status ${conf.cls}`}>{conf.text}</span>
+                      </div>
+                      {hasContent && (
+                        <div className="report-section-body">{section.analysisText}</div>
+                      )}
+                    </div>
+                  );
+                })
+            )}
+          </div>
+        </div>
       </div>
     </section>
   );
@@ -667,57 +796,59 @@ function ResourcePanel({
         <span>资源与落地要点</span>
         <SlidersHorizontal size={18} />
       </div>
-      <ResourceGroup
-        title="我方强资源"
-        icon={<Handshake size={16} />}
-        items={state.settings.strongResources}
-        onAdd={() => addItem("strongResources")}
-        render={(item: StrongResource) => (
-          <ResourceItem
-            checked={item.enabled}
-            name={item.name}
-            note={item.notes}
-            onEnabled={(enabled) => updateItem<StrongResource>("strongResources", item.id, { enabled })}
-            onName={(name) => updateItem<StrongResource>("strongResources", item.id, { name })}
-            onNote={(notes) => updateItem<StrongResource>("strongResources", item.id, { notes })}
-            onRemove={() => removeItem("strongResources", item.id)}
-          />
-        )}
-      />
-      <ResourceGroup
-        title="重点落地区域"
-        icon={<MapPin size={16} />}
-        items={state.settings.landingRegions}
-        onAdd={() => addItem("landingRegions")}
-        render={(item: LandingRegion) => (
-          <ResourceItem
-            checked={item.enabled}
-            name={item.name}
-            note={item.notes ?? ""}
-            onEnabled={(enabled) => updateItem<LandingRegion>("landingRegions", item.id, { enabled })}
-            onName={(name) => updateItem<LandingRegion>("landingRegions", item.id, { name })}
-            onNote={(notes) => updateItem<LandingRegion>("landingRegions", item.id, { notes })}
-            onRemove={() => removeItem("landingRegions", item.id)}
-          />
-        )}
-      />
-      <ResourceGroup
-        title="落地方式"
-        icon={<Target size={16} />}
-        items={state.settings.landingMethods}
-        onAdd={() => addItem("landingMethods")}
-        render={(item: LandingMethod) => (
-          <ResourceItem
-            checked={item.enabled}
-            name={item.name}
-            note={item.notes}
-            onEnabled={(enabled) => updateItem<LandingMethod>("landingMethods", item.id, { enabled })}
-            onName={(name) => updateItem<LandingMethod>("landingMethods", item.id, { name })}
-            onNote={(notes) => updateItem<LandingMethod>("landingMethods", item.id, { notes })}
-            onRemove={() => removeItem("landingMethods", item.id)}
-          />
-        )}
-      />
+      <div className="resource-scroll">
+        <ResourceGroup
+          title="我方强资源"
+          icon={<Handshake size={16} />}
+          items={state.settings.strongResources}
+          onAdd={() => addItem("strongResources")}
+          render={(item: StrongResource) => (
+            <ResourceItem
+              checked={item.enabled}
+              name={item.name}
+              note={item.notes}
+              onEnabled={(enabled) => updateItem<StrongResource>("strongResources", item.id, { enabled })}
+              onName={(name) => updateItem<StrongResource>("strongResources", item.id, { name })}
+              onNote={(notes) => updateItem<StrongResource>("strongResources", item.id, { notes })}
+              onRemove={() => removeItem("strongResources", item.id)}
+            />
+          )}
+        />
+        <ResourceGroup
+          title="重点落地区域"
+          icon={<MapPin size={16} />}
+          items={state.settings.landingRegions}
+          onAdd={() => addItem("landingRegions")}
+          render={(item: LandingRegion) => (
+            <ResourceItem
+              checked={item.enabled}
+              name={item.name}
+              note={item.notes ?? ""}
+              onEnabled={(enabled) => updateItem<LandingRegion>("landingRegions", item.id, { enabled })}
+              onName={(name) => updateItem<LandingRegion>("landingRegions", item.id, { name })}
+              onNote={(notes) => updateItem<LandingRegion>("landingRegions", item.id, { notes })}
+              onRemove={() => removeItem("landingRegions", item.id)}
+            />
+          )}
+        />
+        <ResourceGroup
+          title="落地方式"
+          icon={<Target size={16} />}
+          items={state.settings.landingMethods}
+          onAdd={() => addItem("landingMethods")}
+          render={(item: LandingMethod) => (
+            <ResourceItem
+              checked={item.enabled}
+              name={item.name}
+              note={item.notes}
+              onEnabled={(enabled) => updateItem<LandingMethod>("landingMethods", item.id, { enabled })}
+              onName={(name) => updateItem<LandingMethod>("landingMethods", item.id, { name })}
+              onNote={(notes) => updateItem<LandingMethod>("landingMethods", item.id, { notes })}
+              onRemove={() => removeItem("landingMethods", item.id)}
+            />
+          )}
+        />
+      </div>
     </div>
   );
 }

@@ -1035,6 +1035,86 @@ app.post("/api/upload", upload.array("files"), async (req, res) => {
   res.json(publicState(state));
 });
 
+app.post("/api/report/generate", async (req, res) => {
+  // Set up SSE headers
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders();
+
+  const send = (type, payload) => {
+    res.write(`data: ${JSON.stringify({ type, ...payload })}\n\n`);
+  };
+
+  try {
+    const state = await readState();
+    if (!state.settings.qwen.apiKey) {
+      send("error", { message: "模型 API Key 尚未配置，请先在设置菜单填写并测试连接。" });
+      res.end();
+      return;
+    }
+
+    // Collect all enabled, non-locked nodes in order
+    const nodesToGenerate = [];
+    flatten(state.framework).forEach((item) => {
+      if (item.enabled && !item.locked && !state.sections[item.id]?.locked) {
+        const node = findNode(state.framework, item.id);
+        if (node) nodesToGenerate.push(node);
+      }
+    });
+
+    if (nodesToGenerate.length === 0) {
+      send("error", { message: "没有可生成的章节（所有章节已锁定或未启用）。" });
+      res.end();
+      return;
+    }
+
+    send("start", { total: nodesToGenerate.length });
+
+    for (let i = 0; i < nodesToGenerate.length; i++) {
+      const reportNode = nodesToGenerate[i];
+      const currentState = await readState();
+
+      // Mark as generating
+      const section = currentState.sections[reportNode.id];
+      if (section?.locked) continue; // skip if locked in the meantime
+      reportNode.status = "generating";
+      currentState.sections[reportNode.id] = { ...section, status: "generating" };
+      await writeState(currentState);
+
+      send("generating", { id: reportNode.id, title: reportNode.title, index: i, total: nodesToGenerate.length });
+
+      try {
+        const freshState = await readState();
+        const freshNode = findNode(freshState.framework, reportNode.id);
+        const draft = await callQwenForSection(freshState, freshNode ?? reportNode);
+
+        freshState.sections[reportNode.id] = draft;
+        if (freshNode) freshNode.status = draft.status;
+        await writeState(freshState);
+
+        send("section", { id: reportNode.id, section: draft, index: i, total: nodesToGenerate.length });
+      } catch (err) {
+        // Mark failed section back to not_started and continue
+        const errState = await readState();
+        const errNode = findNode(errState.framework, reportNode.id);
+        if (errNode) errNode.status = "not_started";
+        if (errState.sections[reportNode.id]) errState.sections[reportNode.id].status = "not_started";
+        await writeState(errState);
+
+        send("section_error", { id: reportNode.id, title: reportNode.title, message: err.message });
+      }
+    }
+
+    const finalState = await readState();
+    send("done", { state: publicState(finalState) });
+  } catch (err) {
+    send("error", { message: err.message || "生成失败。" });
+  }
+
+  res.end();
+});
+
 app.post("/api/export/docx", async (_req, res, next) => {
   try {
     const state = await readState();
