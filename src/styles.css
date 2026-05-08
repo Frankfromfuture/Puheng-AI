@@ -311,14 +311,12 @@ nav button.active {
 
 .dashboard-grid {
   display: grid;
-  grid-template-columns: minmax(330px, 0.9fr) minmax(460px, 1.1fr);
-  grid-template-areas:
-    "project section"
-    "resources section"
-    "framework section"
-    "capital evidence";
+  grid-template-columns: minmax(420px, 1fr) 430px;
   gap: 12px;
-  align-items: start;
+  align-items: stretch;
+  height: calc(100dvh - 90px);
+  min-height: 620px;
+  overflow: hidden;
 }
 
 .single-grid,
@@ -339,28 +337,14 @@ nav button.active {
   padding: 12px;
 }
 
-.project-panel {
-  grid-area: project;
-}
-
-.resource-panel {
-  grid-area: resources;
-}
-
-.framework-panel {
-  grid-area: framework;
-}
-
-.capital-panel {
-  grid-area: capital;
-}
-
-.section-panel {
-  grid-area: section;
-}
-
-.evidence-panel {
-  grid-area: evidence;
+.workspace-left {
+  min-width: 0;
+  height: 100%;
+  overflow: auto;
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding-right: 2px;
 }
 
 .panel-title {
@@ -578,7 +562,7 @@ textarea {
 .tree {
   display: grid;
   gap: 6px;
-  max-height: min(54vh, 620px);
+  max-height: none;
   overflow: auto;
   padding-right: 2px;
 }
@@ -699,8 +683,13 @@ textarea {
 }
 
 .section-panel {
-  position: sticky;
-  top: 12px;
+  position: static;
+  width: 430px;
+  max-width: 430px;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .section-head {
@@ -713,16 +702,16 @@ textarea {
 }
 
 .section-head h2 {
-  margin: 9px 0 5px;
-  font-size: 19px;
+  margin: 4px 0 0;
+  font-size: 18px;
   color: var(--ink-900);
 }
 
-.section-head p {
-  margin: 0;
-  color: var(--ink-600);
-  line-height: 1.55;
-  font-size: 12px;
+.section-head span {
+  display: block;
+  color: var(--ink-500);
+  font-size: 11px;
+  font-weight: 800;
 }
 
 .section-actions {
@@ -733,132 +722,20 @@ textarea {
   min-width: 210px;
 }
 
-.section-meta {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 112px 84px 98px;
-  gap: 9px;
-  margin-top: 11px;
-  align-items: end;
-}
-
-.word-toggle input {
-  width: 16px;
-  height: 16px;
-}
-
 .body-editor textarea {
-  min-height: min(42vh, 360px);
-}
-
-.capital-panel {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 12px;
-}
-
-.capital-list {
-  display: grid;
-  gap: 7px;
-}
-
-.capital-list button {
-  min-height: 38px;
-  border: 1px solid var(--ink-200);
-  background: var(--ink-0);
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 0 10px;
-  color: var(--ink-700);
-}
-
-.capital-list button:hover {
-  border-color: var(--ink-400);
-  background: var(--ink-100);
-}
-
-.capital-list strong {
-  color: var(--ink-900);
+  min-height: 0;
+  height: 100%;
+  resize: none;
   font-family: var(--font-mono);
-  font-size: 11px;
-}
-
-.capital-facts {
-  border-top: 1px solid var(--ink-200);
-  padding-top: 12px;
-}
-
-.capital-facts h3,
-.evidence-panel h3 {
-  margin: 0 0 8px;
   font-size: 13px;
-  color: var(--ink-900);
+  line-height: 1.65;
+  white-space: pre-wrap;
 }
 
-.capital-facts p,
-.evidence-panel p {
-  color: var(--ink-500);
-  line-height: 1.6;
-  margin: 0 0 10px;
-  font-size: 12px;
-}
-
-.source-count {
-  color: #735f32;
-  font-weight: 800;
-}
-
-.citation-list,
-.source-pool,
-.gap-list {
-  display: grid;
-  gap: 8px;
-  margin-bottom: 16px;
-}
-
-.citation {
-  border: 1px solid var(--ink-200);
-  border-radius: 6px;
-  padding: 9px;
-  display: grid;
-  gap: 4px;
-}
-
-.citation strong {
-  font-size: 12px;
-  color: var(--ink-800);
-}
-
-.citation span,
-.citation a {
-  font-size: 11px;
-  color: var(--ink-500);
-}
-
-.citation a {
-  color: var(--ink-900);
-  text-decoration: none;
-}
-
-.gap-list {
-  padding-left: 18px;
-  color: var(--ink-600);
-  line-height: 1.5;
-  font-size: 12px;
-}
-
-.source-pool {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.source-pool span {
-  background: var(--ink-100);
-  border-radius: 6px;
-  padding: 8px;
-  color: var(--ink-600);
-  font-size: 11px;
+.preview-editor {
+  margin-top: 12px;
+  min-height: 0;
+  flex: 1;
 }
 
 .settings-form,
@@ -943,18 +820,12 @@ textarea {
 
 @media (max-width: 1280px) {
   .dashboard-grid {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-areas:
-      "project"
-      "resources"
-      "framework"
-      "section"
-      "capital"
-      "evidence";
+    grid-template-columns: minmax(360px, 1fr) 400px;
   }
 
   .section-panel {
-    position: static;
+    width: 400px;
+    max-width: 400px;
   }
 
   .tree {
@@ -999,13 +870,33 @@ textarea {
 
   .settings-grid,
   .form-grid,
-  .command-row,
-  .section-meta {
+  .command-row {
     grid-template-columns: 1fr;
   }
 
-  .source-pool {
-    grid-template-columns: 1fr;
+  .dashboard-grid {
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .workspace-left {
+    height: auto;
+    overflow: visible;
+    padding-right: 0;
+  }
+
+  .section-panel {
+    position: static;
+    width: auto;
+    max-width: none;
+  }
+
+  .body-editor textarea {
+    min-height: 420px;
+    max-height: none;
+    resize: vertical;
   }
 
   .file-row {

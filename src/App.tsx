@@ -1,9 +1,6 @@
 import {
-  AlertTriangle,
   Archive,
-  BarChart3,
   Check,
-  ChevronDown,
   Download,
   FileText,
   GripVertical,
@@ -12,26 +9,22 @@ import {
   Layers3,
   Lock,
   MapPin,
-  PencilLine,
   Plus,
   RefreshCcw,
   Save,
   Settings as SettingsIcon,
-  ShieldCheck,
   SlidersHorizontal,
   Sparkles,
   Target,
   Trash2,
   Unlock,
-  Upload,
-  UsersRound
+  Upload
 } from "lucide-react";
 import { ChangeEvent, DragEvent, ReactNode, useEffect, useMemo, useState } from "react";
 import type {
   AnalysisDepth,
   AnalysisSection,
   AppState,
-  Citation,
   ExternalApiSetting,
   LandingMethod,
   LandingRegion,
@@ -189,11 +182,6 @@ function createNode(title = "自定义章节"): ReportNode {
     locked: false,
     children: []
   };
-}
-
-function confidenceLabel(section?: AnalysisSection) {
-  if (!section || section.status === "not_started") return "置信度：待生成";
-  return `置信度：${section.confidenceScore}%｜${section.confidenceReason || "暂无说明"}｜资料覆盖：${section.sourceCoverage || "未说明"}`;
 }
 
 function depthClass(depth: AnalysisDepth) {
@@ -503,104 +491,105 @@ function Dashboard(props: DashboardProps) {
 
   return (
     <section className="dashboard-grid">
-      <div className="panel project-panel command-panel">
-        <div className="panel-title">
-          <span>研究入口</span>
-          <Target size={18} />
-        </div>
-        <div className="command-row">
-          <Field label="公司名称" value={state.project.companyName} onChange={(companyName) => saveProject({ companyName })} />
-          <div className="model-token">
-            <span>当前模型</span>
-            <strong>{state.settings.qwen.model}</strong>
+      <div className="workspace-left">
+        <div className="panel project-panel command-panel">
+          <div className="panel-title">
+            <span>研究入口</span>
+            <Target size={18} />
+          </div>
+          <div className="command-row">
+            <Field label="公司名称" value={state.project.companyName} onChange={(companyName) => saveProject({ companyName })} />
+            <div className="model-token">
+              <span>当前模型</span>
+              <strong>{state.settings.qwen.model}</strong>
+            </div>
+          </div>
+          <div className="requirement-grid" aria-label="研究要求">
+            {requirementOptions.map((option) => (
+              <button
+                key={option.id}
+                className={state.project.researchRequirement === option.id ? "selected" : ""}
+                onClick={() => saveProject({ researchRequirement: option.id })}
+              >
+                <strong>{option.label}</strong>
+                <span>{option.focus}</span>
+              </button>
+            ))}
           </div>
         </div>
-        <div className="requirement-grid" aria-label="研究要求">
-          {requirementOptions.map((option) => (
-            <button
-              key={option.id}
-              className={state.project.researchRequirement === option.id ? "selected" : ""}
-              onClick={() => saveProject({ researchRequirement: option.id })}
-            >
-              <strong>{option.label}</strong>
-              <span>{option.focus}</span>
+
+        <ResourcePanel
+          state={state}
+          updateItem={updateSettingItem}
+          addItem={addSettingItem}
+          removeItem={removeSettingItem}
+        />
+
+        <div className="panel framework-panel">
+          <div className="panel-title">
+            <span>报告框架图</span>
+            <button className="icon-button" onClick={addRoot} title="增加一级章节">
+              <Plus size={16} />
             </button>
-          ))}
-        </div>
-      </div>
-
-      <ResourcePanel
-        state={state}
-        updateItem={updateSettingItem}
-        addItem={addSettingItem}
-        removeItem={removeSettingItem}
-      />
-
-      <div className="panel framework-panel">
-        <div className="panel-title">
-          <span>报告框架图</span>
-          <button className="icon-button" onClick={addRoot} title="增加一级章节">
-            <Plus size={16} />
-          </button>
-        </div>
-        <div className="tree">
-          {flatNodes.map(({ node, level }) => (
-            <div
-              key={node.id}
-              className={`tree-row ${activeSectionId === node.id ? "selected" : ""}`}
-              style={{ paddingLeft: `${(level - 1) * 22 + 10}px` }}
-              draggable
-              onDragStart={() => setDragId(node.id)}
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={(event) => onDrop(event, node.id)}
-              onClick={() => setActiveSectionId(node.id)}
-            >
-              <GripVertical size={15} className="drag" />
-              <input
-                className="tree-check"
-                type="checkbox"
-                checked={node.enabled}
-                onChange={(event) => patchNode(node.id, { enabled: event.target.checked })}
-                onClick={(event) => event.stopPropagation()}
-                title="是否生成"
-              />
-              <input
-                className="tree-title"
-                value={node.title}
-                onChange={(event) => patchNode(node.id, { title: event.target.value })}
-                onClick={(event) => event.stopPropagation()}
-              />
-              <select
-                className={`depth-badge ${depthClass(node.depth)}`}
-                value={node.depth}
-                onChange={(event) => patchNode(node.id, { depth: event.target.value as AnalysisDepth })}
-                onClick={(event) => event.stopPropagation()}
+          </div>
+          <div className="tree">
+            {flatNodes.map(({ node, level }) => (
+              <div
+                key={node.id}
+                className={`tree-row ${activeSectionId === node.id ? "selected" : ""}`}
+                style={{ paddingLeft: `${(level - 1) * 22 + 10}px` }}
+                draggable
+                onDragStart={() => setDragId(node.id)}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={(event) => onDrop(event, node.id)}
+                onClick={() => setActiveSectionId(node.id)}
               >
-                {depthOptions.map((depth) => (
-                  <option key={depth}>{depth}</option>
-                ))}
-              </select>
-              <span className={`status ${statusClass[node.status]}`}>{statusText[node.status]}</span>
-              {node.locked && <Lock size={14} className="lock" />}
-              <button className="icon-button" onClick={(event) => { event.stopPropagation(); addSubsection(node.id); }} title="增加二级章节">
-                <Plus size={15} />
-              </button>
-              <button className="icon-button danger" onClick={(event) => { event.stopPropagation(); remove(node.id); }} title="删除章节">
-                <Trash2 size={15} />
-              </button>
-            </div>
-          ))}
+                <GripVertical size={15} className="drag" />
+                <input
+                  className="tree-check"
+                  type="checkbox"
+                  checked={node.enabled}
+                  onChange={(event) => patchNode(node.id, { enabled: event.target.checked })}
+                  onClick={(event) => event.stopPropagation()}
+                  title="是否生成"
+                />
+                <input
+                  className="tree-title"
+                  value={node.title}
+                  onChange={(event) => patchNode(node.id, { title: event.target.value })}
+                  onClick={(event) => event.stopPropagation()}
+                />
+                <select
+                  className={`depth-badge ${depthClass(node.depth)}`}
+                  value={node.depth}
+                  onChange={(event) => patchNode(node.id, { depth: event.target.value as AnalysisDepth })}
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  {depthOptions.map((depth) => (
+                    <option key={depth}>{depth}</option>
+                  ))}
+                </select>
+                <span className={`status ${statusClass[node.status]}`}>{statusText[node.status]}</span>
+                {node.locked && <Lock size={14} className="lock" />}
+                <button className="icon-button" onClick={(event) => { event.stopPropagation(); addSubsection(node.id); }} title="增加二级章节">
+                  <Plus size={15} />
+                </button>
+                <button className="icon-button danger" onClick={(event) => { event.stopPropagation(); remove(node.id); }} title="删除章节">
+                  <Trash2 size={15} />
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
-      <div className="panel section-panel">
+      <div className="panel section-panel brief-preview-panel">
         {activeSection && activeNode ? (
           <>
             <div className="section-head">
               <div>
-                <span className={`status ${statusClass[activeSection.status]}`}>{statusText[activeSection.status]}</span>
+                <span>简报预览</span>
                 <h2>{activeSection.title}</h2>
-                <p>{confidenceLabel(activeSection)}</p>
               </div>
               <div className="section-actions">
                 {activeSection.locked ? (
@@ -620,62 +609,7 @@ function Dashboard(props: DashboardProps) {
               </div>
             </div>
 
-            <div className="section-meta">
-              <label>
-                备注要求
-                <input
-                  value={activeNode.notes}
-                  disabled={activeSection.locked}
-                  onChange={(event) => patchNode(activeNode.id, { notes: event.target.value })}
-                  placeholder="例如：重点看基金出资与合作基金可能性"
-                />
-              </label>
-              <label>
-                研究深度
-                <select
-                  className={`depth-input ${depthClass(activeNode.depth)}`}
-                  value={activeNode.depth}
-                  disabled={activeSection.locked}
-                  onChange={(event) => patchNode(activeNode.id, { depth: event.target.value as AnalysisDepth })}
-                >
-                  {depthOptions.map((depth) => (
-                    <option key={depth}>{depth}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="word-toggle">
-                进入 Word
-                <input
-                  type="checkbox"
-                  checked={activeNode.includeInWord}
-                  disabled={activeSection.locked}
-                  onChange={(event) => patchNode(activeNode.id, { includeInWord: event.target.checked })}
-                />
-              </label>
-              <label>
-                置信度
-                <input
-                  type="number"
-                  min={0}
-                  max={100}
-                  value={activeSection.confidenceScore}
-                  disabled={activeSection.locked}
-                  onChange={(event) => saveSection(activeSection.id, { confidenceScore: Number(event.target.value) })}
-                />
-              </label>
-            </div>
-
-            <label className="textarea-label">
-              置信度分析
-              <textarea
-                value={activeSection.confidenceReason}
-                disabled={activeSection.locked}
-                onChange={(event) => saveSection(activeSection.id, { confidenceReason: event.target.value })}
-              />
-            </label>
-
-            <label className="textarea-label body-editor">
-              章节正文
+            <label className="body-editor preview-editor">
               <textarea
                 value={activeSection.analysisText}
                 disabled={activeSection.locked}
@@ -691,9 +625,6 @@ function Dashboard(props: DashboardProps) {
           </div>
         )}
       </div>
-
-      <CapitalPanel state={state} setActiveSectionId={setActiveSectionId} />
-      <EvidencePanel section={activeSection} sources={state.sources} />
     </section>
   );
 }
@@ -842,72 +773,6 @@ function ResourceItem({
       <button className="icon-button danger" onClick={onRemove} title="删除">
         <Trash2 size={14} />
       </button>
-    </div>
-  );
-}
-
-function CapitalPanel({ state, setActiveSectionId }: { state: AppState; setActiveSectionId: (id: string) => void }) {
-  const capitalIds = new Set(["capital-cooperation", ...flatten(state.framework).filter((item) => item.parentId === "capital-cooperation").map((item) => item.node.id)]);
-  const items = Object.values(state.sections).filter((section) => capitalIds.has(section.id));
-  const citations = items.flatMap((section) => section.citations);
-  return (
-    <div className="panel capital-panel">
-      <div className="panel-title">
-        <span>资本合作分析工作区</span>
-        <BarChart3 size={18} />
-      </div>
-      <div className="capital-list">
-        {items.map((section) => (
-          <button key={section.id} onClick={() => setActiveSectionId(section.id)}>
-            <span>{section.title}</span>
-            <strong>{section.confidenceScore ? `${section.confidenceScore}%` : "待生成"}</strong>
-          </button>
-        ))}
-      </div>
-      <div className="capital-facts">
-        <h3>资本事实约束</h3>
-        <p>融资金额、估值、主要投资者、基金出资与合作基金线索必须绑定来源；无法确认的信息只进入“待核实”。</p>
-        <div className="source-count">{citations.length} 条资本相关引用</div>
-      </div>
-    </div>
-  );
-}
-
-function EvidencePanel({ section, sources }: { section?: AnalysisSection; sources: Citation[] }) {
-  return (
-    <div className="panel evidence-panel">
-      <div className="panel-title">
-        <span>引用与缺口</span>
-        <FileText size={18} />
-      </div>
-      <h3>本节引用</h3>
-      {section?.citations.length ? (
-        <div className="citation-list">
-          {section.citations.map((cite) => (
-            <div key={`${cite.id}-${cite.usedIn}`} className="citation">
-              <strong>{cite.title}</strong>
-              <span>{cite.sourceType} · {cite.publishedAt || "日期待补充"}</span>
-              {cite.url && <a href={cite.url} target="_blank" rel="noreferrer">打开来源</a>}
-            </div>
-          ))}
-        </div>
-      ) : (
-        <p className="muted-text">本节暂无引用。未绑定来源的资本信息不会进入确定性正文。</p>
-      )}
-      <h3>待核实问题</h3>
-      {section?.missingInfo.length ? (
-        <ul className="gap-list">
-          {section.missingInfo.map((gap) => <li key={gap}>{gap}</li>)}
-        </ul>
-      ) : (
-        <p className="muted-text">暂无待核实事项。</p>
-      )}
-      <h3>全局来源池</h3>
-      <div className="source-pool">
-        {sources.map((source) => (
-          <span key={source.id}>{source.title}</span>
-        ))}
-      </div>
     </div>
   );
 }

@@ -8,16 +8,11 @@ import multer from "multer";
 import OpenAI from "openai";
 import {
   AlignmentType,
-  BorderStyle,
   Document,
   HeadingLevel,
   Packer,
   Paragraph,
-  Table,
-  TableCell,
-  TableRow,
   TextRun,
-  WidthType
 } from "docx";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -723,58 +718,6 @@ function paragraph(text, options = {}) {
   });
 }
 
-function bullet(text) {
-  return new Paragraph({
-    bullet: { level: 0 },
-    spacing: { after: 80, line: 300 },
-    children: [new TextRun({ text, font: "Microsoft YaHei", size: 21 })]
-  });
-}
-
-function confidenceLine(section) {
-  return `置信度：${section.confidenceScore}%｜${section.confidenceReason || "暂无说明"}｜资料覆盖：${section.sourceCoverage || "未说明"}`;
-}
-
-function sourceRows(citations) {
-  if (citations.length === 0) {
-    return [
-      new TableRow({
-        children: [
-          new TableCell({
-            columnSpan: 5,
-            children: [paragraph("暂无可列明引用来源。")]
-          })
-        ]
-      })
-    ];
-  }
-  return citations.map(
-    (item) =>
-      new TableRow({
-        children: [
-          cell(item.title || "未命名来源"),
-          cell(item.sourceType || "未分类"),
-          cell(item.publishedAt || ""),
-          cell(item.usedIn || ""),
-          cell(item.url || "")
-        ]
-      })
-  );
-}
-
-function cell(text, shading = undefined) {
-  return new TableCell({
-    shading,
-    margins: { top: 100, bottom: 100, left: 120, right: 120 },
-    children: [
-      new Paragraph({
-        spacing: { after: 0 },
-        children: [new TextRun({ text: String(text), font: "Microsoft YaHei", size: 18 })]
-      })
-    ]
-  });
-}
-
 async function buildDocx(state) {
   const confirmed = [];
   walk(state.framework, (item, parent, level) => {
@@ -795,18 +738,6 @@ async function buildDocx(state) {
     throw error;
   }
 
-  const allCitations = [];
-  for (const item of confirmed) {
-    for (const cite of item.section.citations ?? []) {
-      allCitations.push({ ...cite, usedIn: cite.usedIn || item.section.title });
-    }
-  }
-  const citationMap = new Map();
-  for (const cite of allCitations) {
-    citationMap.set(`${cite.id}-${cite.usedIn}-${cite.url}`, cite);
-  }
-  const uniqueCitations = Array.from(citationMap.values());
-
   const children = [
     new Paragraph({
       alignment: AlignmentType.CENTER,
@@ -825,7 +756,7 @@ async function buildDocx(state) {
       alignment: AlignmentType.CENTER,
       run: { color: "5D6774" }
     }),
-    paragraph("资料说明：本报告基于用户确认章节生成。未列明来源或置信度不足的信息应作为待核实事项，不构成审计、法律意见或投资承诺。", {
+    paragraph("资料说明：本报告基于工作台简报预览中的已确认章节正文生成，不构成审计、法律意见或投资承诺。", {
       run: { color: "5D6774" }
     })
   ];
@@ -843,62 +774,18 @@ async function buildDocx(state) {
             color: item.level === 1 ? "0D6B5F" : "1D2939"
           })
         ]
-      }),
-      paragraph(confidenceLine(item.section), {
-        run: { color: item.section.confidenceScore >= 70 ? "0D6B5F" : "B25E09", bold: true }
       })
     );
 
-    if (item.section.keyFindings?.length) {
-      children.push(paragraph("关键要点", { run: { bold: true } }));
-      item.section.keyFindings.forEach((finding) => children.push(bullet(finding)));
-    }
-
     if (item.section.analysisText) {
       item.section.analysisText
-        .split(/\n+/)
-        .map((line) => line.trim())
-        .filter(Boolean)
+        .split("\n")
+        .map((line) => line.trimEnd())
         .forEach((line) => children.push(paragraph(line)));
-    }
-
-    if (item.section.missingInfo?.length) {
-      children.push(paragraph("待核实与资料缺口", { run: { bold: true, color: "B25E09" } }));
-      item.section.missingInfo.forEach((gap) => children.push(bullet(gap)));
+    } else {
+      children.push(paragraph(""));
     }
   }
-
-  children.push(
-    new Paragraph({
-      heading: HeadingLevel.HEADING_1,
-      spacing: { before: 300, after: 120 },
-      children: [new TextRun({ text: "引用来源附录", bold: true, font: "Microsoft YaHei", color: "0D6B5F" })]
-    }),
-    new Table({
-      width: { size: 100, type: WidthType.PERCENTAGE },
-      borders: {
-        top: { style: BorderStyle.SINGLE, size: 1, color: "D0D5DD" },
-        bottom: { style: BorderStyle.SINGLE, size: 1, color: "D0D5DD" },
-        left: { style: BorderStyle.SINGLE, size: 1, color: "D0D5DD" },
-        right: { style: BorderStyle.SINGLE, size: 1, color: "D0D5DD" },
-        insideHorizontal: { style: BorderStyle.SINGLE, size: 1, color: "EAECF0" },
-        insideVertical: { style: BorderStyle.SINGLE, size: 1, color: "EAECF0" }
-      },
-      rows: [
-        new TableRow({
-          tableHeader: true,
-          children: [
-            cell("来源名称", { fill: "E7F3F0" }),
-            cell("类型", { fill: "E7F3F0" }),
-            cell("发布日期", { fill: "E7F3F0" }),
-            cell("使用位置", { fill: "E7F3F0" }),
-            cell("链接", { fill: "E7F3F0" })
-          ]
-        }),
-        ...sourceRows(uniqueCitations)
-      ]
-    })
-  );
 
   const doc = new Document({
     creator: "清大浦恒 AI",
