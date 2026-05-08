@@ -424,7 +424,7 @@ export default function App() {
     <div className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <aside className={`sidebar ${sidebarCollapsed ? "collapsed" : ""}`}>
         <div className="brand">
-          <div className="brand-mark">浦</div>
+          <img src="/logo.svg" alt="浦恒 Logo" className={`brand-logo ${sidebarCollapsed ? "collapsed" : ""}`} />
           {!sidebarCollapsed && (
             <div>
               <strong>清大浦恒 AI</strong>
