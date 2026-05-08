@@ -4,7 +4,10 @@ import {
   Briefcase,
   Building2,
   Check,
+  Clipboard,
+  Database,
   Download,
+  Eraser,
   FileText,
   GripVertical,
   Handshake,
@@ -13,6 +16,7 @@ import {
   Lock,
   MapPin,
   Maximize,
+  Network,
   PanelLeft,
   PanelLeftClose,
   PlayCircle,
@@ -29,7 +33,7 @@ import {
   Upload,
   Zap
 } from "lucide-react";
-import { ChangeEvent, DragEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, DragEvent, MouseEventHandler, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import type {
   AnalysisDepth,
   AnalysisSection,
@@ -67,6 +71,9 @@ const api = {
   async draftSection(id: string): Promise<AppState> {
     return request(`/api/sections/${id}/draft`, { method: "POST" });
   },
+  async clearReport(): Promise<AppState> {
+    return request("/api/report/clear", { method: "POST" });
+  },
   async confirmSection(id: string, section: Partial<AnalysisSection>): Promise<AppState> {
     return request(`/api/sections/${id}/confirm`, { method: "POST", body: JSON.stringify(section) });
   },
@@ -98,7 +105,7 @@ async function request<T>(url: string, init: RequestInit = {}): Promise<T> {
   return payload as T;
 }
 
-const depthOptions: AnalysisDepth[] = ["简版", "标准", "深入", "专项"];
+const depthOptions: AnalysisDepth[] = ["简版", "标准", "深入"];
 
 const requirementOptions: Array<{ id: ResearchRequirement; label: string; shortLabel: string; focus: string; icon: typeof Zap }> = [
   { id: "brief", label: "简要分析", shortLabel: "简要", focus: "所有框架均简单分析", icon: Zap },
@@ -214,13 +221,135 @@ function createNode(title = "自定义章节"): ReportNode {
 function depthClass(depth: AnalysisDepth) {
   if (depth === "深入") return "deep";
   if (depth === "简版") return "simple";
-  if (depth === "专项") return "special";
   return "standard";
+}
+
+function generatedAnalysisBody(section: AnalysisSection | undefined, node: ReportNode) {
+  const text = section?.analysisText?.trim() ?? "";
+  if (!text) return "";
+  const meaningfulLines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => {
+      if (!line) return false;
+      const plainHeading = line.replace(/^#{1,6}\s*/, "").replace(/[：:]\s*$/, "").trim();
+      return plainHeading !== node.title;
+    });
+  return meaningfulLines.join("\n").trim();
+}
+
+function renderInlineMarkdown(text: string) {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g).filter(Boolean);
+  return parts.map((part, index) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return <strong key={index}>{part.slice(2, -2)}</strong>;
+    }
+    return <span key={index}>{part}</span>;
+  });
+}
+
+function isMarkdownTableSeparator(line: string) {
+  const cells = line.trim().split("|").map((cell) => cell.trim()).filter(Boolean);
+  return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
+}
+
+function parseMarkdownTable(lines: string[], startIndex: number) {
+  if (startIndex + 1 >= lines.length || !lines[startIndex].includes("|") || !isMarkdownTableSeparator(lines[startIndex + 1])) {
+    return null;
+  }
+
+  const parseRow = (line: string) => {
+    const trimmed = line.trim().replace(/^\|/, "").replace(/\|$/, "");
+    return trimmed.split("|").map((cell) => cell.trim());
+  };
+
+  const headers = parseRow(lines[startIndex]);
+  const rows: string[][] = [];
+  let index = startIndex + 2;
+  while (index < lines.length && lines[index].includes("|") && lines[index].trim()) {
+    if (!isMarkdownTableSeparator(lines[index])) rows.push(parseRow(lines[index]));
+    index += 1;
+  }
+
+  if (headers.length === 0 || rows.length === 0) return null;
+  return { headers, rows, nextIndex: index };
+}
+
+function MarkdownPreview({ text }: { text: string }) {
+  const lines = text.split(/\r?\n/);
+  const elements: ReactNode[] = [];
+  let paragraphLines: string[] = [];
+
+  const flushParagraph = () => {
+    if (paragraphLines.length === 0) return;
+    const block = paragraphLines.join("\n").trim();
+    if (block) {
+      elements.push(
+        <p key={`p-${elements.length}`}>
+          {block.split(/\n/).map((line, lineIndex) => (
+            <span key={lineIndex}>
+              {lineIndex > 0 && <br />}
+              {renderInlineMarkdown(line)}
+            </span>
+          ))}
+        </p>
+      );
+    }
+    paragraphLines = [];
+  };
+
+  for (let index = 0; index < lines.length;) {
+    const line = lines[index];
+    const table = parseMarkdownTable(lines, index);
+    if (table) {
+      flushParagraph();
+      elements.push(
+        <div className="markdown-table-wrap" key={`table-${elements.length}`}>
+          <table className="markdown-table">
+            <thead>
+              <tr>
+                {table.headers.map((cell, cellIndex) => (
+                  <th key={cellIndex}>{renderInlineMarkdown(cell)}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {table.rows.map((row, rowIndex) => (
+                <tr key={rowIndex}>
+                  {table.headers.map((_, cellIndex) => (
+                    <td key={cellIndex}>{renderInlineMarkdown(row[cellIndex] ?? "")}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+      index = table.nextIndex;
+      continue;
+    }
+
+    if (!line.trim()) {
+      flushParagraph();
+      index += 1;
+      continue;
+    }
+
+    paragraphLines.push(line);
+    index += 1;
+  }
+  flushParagraph();
+
+  return (
+    <div className="report-section-body">
+      {elements}
+    </div>
+  );
 }
 
 export default function App() {
   const [state, setState] = useState<AppState | null>(null);
-  const [activeView, setActiveView] = useState<"dashboard" | "settings" | "files" | "prompts">("dashboard");
+  const [activeView, setActiveView] = useState<"dashboard" | "companyDatabase" | "companyGraph" | "settings" | "files" | "prompts">("dashboard");
   const [activeSectionId, setActiveSectionId] = useState("capital-cooperation");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState("");
@@ -245,6 +374,9 @@ export default function App() {
   const activeNode = flatNodes.find((item) => item.node.id === activeSectionId)?.node;
   const confirmedCount = state
     ? Object.values(state.sections).filter((section) => section.status === "confirmed").length
+    : 0;
+  const generatedCount = state
+    ? flatNodes.filter(({ node }) => Boolean(generatedAnalysisBody(state.sections[node.id], node))).length
     : 0;
 
   async function withBusy<T>(label: string, action: () => Promise<T>) {
@@ -294,8 +426,72 @@ export default function App() {
       setMessage("请先在设置菜单配置模型 API Key 并测试连接。");
       return;
     }
+    setState((prev) => {
+      if (!prev) return prev;
+      const currentSection = prev.sections[id];
+      return {
+        ...prev,
+        sections: {
+          ...prev.sections,
+          [id]: { ...currentSection, status: "generating" as SectionStatus }
+        }
+      };
+    });
     const saved = await withBusy("生成章节", () => api.draftSection(id));
     if (saved) applyState(saved);
+  }
+
+  async function clearReport() {
+    const saved = await withBusy("清空分析内容", () => api.clearReport());
+    if (saved) {
+      applyState(saved);
+      setMessage("分析内容已全部清空。");
+    }
+  }
+
+  async function copyGeneratedReport() {
+    if (!state) return;
+    const generated = flatNodes
+      .map(({ node, numbering }) => {
+        const section = state.sections[node.id];
+        const body = generatedAnalysisBody(section, node);
+        return body ? `${numbering} ${node.title}\n${body}` : "";
+      })
+      .filter(Boolean);
+
+    if (generated.length === 0) {
+      setMessage("暂无可复制的已生成分析内容。");
+      return;
+    }
+
+    const text = generated.join("\n\n");
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = text;
+        textarea.setAttribute("readonly", "true");
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+      }
+      setMessage(`已复制 ${generated.length} 个已生成章节。`);
+    } catch {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.setAttribute("readonly", "true");
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      const copied = document.execCommand("copy");
+      document.body.removeChild(textarea);
+      setMessage(copied ? `已复制 ${generated.length} 个已生成章节。` : "复制失败，请确认浏览器允许剪贴板权限。");
+    }
   }
 
   async function confirmSection(id: string) {
@@ -407,7 +603,13 @@ export default function App() {
     const result = await withBusy("生成 Word", () => api.exportDocx());
     if (result) {
       setExportLink(result.url);
-      setMessage(`Word 已生成：${result.filename}`);
+      const link = document.createElement("a");
+      link.href = result.url;
+      link.download = result.filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setMessage(`Word 已生成并开始下载：${result.filename}`);
     }
   }
 
@@ -426,15 +628,20 @@ export default function App() {
         <div className="brand">
           <img src="/logo.svg" alt="浦恒 Logo" className={`brand-logo ${sidebarCollapsed ? "collapsed" : ""}`} />
           {!sidebarCollapsed && (
-            <div>
+            <div className="brand-copy">
               <strong>清大浦恒 AI</strong>
-              <span>企业公开资料与合作分析</span>
             </div>
           )}
         </div>
         <nav>
           <button className={activeView === "dashboard" ? "active" : ""} onClick={() => setActiveView("dashboard")} title="工作台">
             <Layers3 size={18} /> {!sidebarCollapsed && "工作台"}
+          </button>
+          <button className={activeView === "companyDatabase" ? "active" : ""} onClick={() => setActiveView("companyDatabase")} title="企业数据库">
+            <Database size={18} /> {!sidebarCollapsed && "企业数据库"}
+          </button>
+          <button className={activeView === "companyGraph" ? "active" : ""} onClick={() => setActiveView("companyGraph")} title="企业立体关联信息">
+            <Network size={18} /> {!sidebarCollapsed && "企业立体关联信息"}
           </button>
           <button className={activeView === "prompts" ? "active" : ""} onClick={() => setActiveView("prompts")} title="提示词工程">
             <SlidersHorizontal size={18} /> {!sidebarCollapsed && "提示词工程"}
@@ -474,8 +681,7 @@ export default function App() {
       <main className="workspace">
         <header className="topbar">
           <div>
-            <h1>企业分析 Dashboard</h1>
-            <p>先分块生成和微调，再统一输出 Word 报告。</p>
+            <h1>企业智能分析平台</h1>
           </div>
           <div className="top-actions">
             {busy && <span className="busy">{busy}...</span>}
@@ -485,7 +691,7 @@ export default function App() {
                 <Download size={16} /> 打开 Word
               </a>
             )}
-            <button className="button primary" onClick={exportDocx} disabled={confirmedCount === 0 || Boolean(busy)}>
+            <button className="button primary" onClick={exportDocx} disabled={generatedCount === 0 || Boolean(busy)}>
               <FileText size={16} /> 生成 Word
             </button>
           </div>
@@ -504,6 +710,8 @@ export default function App() {
             saveSection={saveSection}
             generateSection={generateSection}
             generateReport={generateReport}
+            clearReport={clearReport}
+            copyGeneratedReport={copyGeneratedReport}
             pauseGeneration={pauseGeneration}
             confirmSection={confirmSection}
             unlockSection={unlockSection}
@@ -511,6 +719,14 @@ export default function App() {
             generating={generating}
             genProgress={genProgress}
           />
+        )}
+
+        {activeView === "companyDatabase" && (
+          <ConstructionView title="企业数据库" />
+        )}
+
+        {activeView === "companyGraph" && (
+          <ConstructionView title="企业立体关联信息" />
         )}
 
         {activeView === "files" && (
@@ -555,6 +771,18 @@ export default function App() {
   );
 }
 
+function ConstructionView({ title }: { title: string }) {
+  return (
+    <section className="construction-view" aria-label={title}>
+      <img src="/logo.svg" alt="浦恒 Logo" className="construction-logo" />
+      <div className="construction-copy">
+        <h2>{title}</h2>
+        <p>建设中，敬请期待</p>
+      </div>
+    </section>
+  );
+}
+
 interface DashboardProps {
   state: AppState;
   flatNodes: FlatNode[];
@@ -567,6 +795,8 @@ interface DashboardProps {
   saveSection: (id: string, patch: Partial<AnalysisSection>) => Promise<void>;
   generateSection: (id: string) => Promise<void>;
   generateReport: () => Promise<void>;
+  clearReport: () => Promise<void>;
+  copyGeneratedReport: () => Promise<void>;
   pauseGeneration: () => void;
   confirmSection: (id: string) => Promise<void>;
   unlockSection: (id: string) => Promise<void>;
@@ -588,6 +818,8 @@ function Dashboard(props: DashboardProps) {
     saveSection,
     generateSection,
     generateReport,
+    clearReport,
+    copyGeneratedReport,
     pauseGeneration,
     confirmSection,
     unlockSection,
@@ -643,18 +875,30 @@ function Dashboard(props: DashboardProps) {
     return saveSettings({ [key]: (state.settings[key] as Array<{ id: string }>).filter((item) => item.id !== id) });
   }
 
+  const [mobilePanel, setMobilePanel] = useState<"framework" | "resources" | "preview">("preview");
+  const mobilePanels = [
+    { id: "framework" as const, label: "框架", icon: Layers3 },
+    { id: "resources" as const, label: "合作点", icon: Handshake },
+    { id: "preview" as const, label: "预览", icon: FileText }
+  ];
+
   return (
     <section className="dashboard-grid">
       {/* Row 1: Compact Research Entry */}
       <div className="panel command-panel-compact">
         <div className="command-compact-row">
           <Target size={16} className="command-icon" />
-          <input
-            className="company-input"
-            value={state.project.companyName}
-            onChange={(event) => saveProject({ companyName: event.target.value })}
-            placeholder="输入公司名称"
-          />
+          <div className="company-input-wrap">
+            <DraftInput
+              className="company-input"
+              value={state.project.companyName}
+              onCommit={(value) => saveProject({ companyName: value })}
+              placeholder="输入公司名称"
+            />
+            {!state.project.companyName.trim() && (
+              <div className="company-guide-bubble">先输入企业名称</div>
+            )}
+          </div>
           <div className="requirement-pills" aria-label="研究要求">
             {requirementOptions.map((option) => {
               const Icon = option.icon;
@@ -679,23 +923,48 @@ function Dashboard(props: DashboardProps) {
               </span>
             )}
             <button
+              className="button ghost clear-report-btn"
+              onClick={clearReport}
+              disabled={Boolean(busy) || generating}
+              title="清空全部已生成分析内容"
+            >
+              <Eraser size={15} />
+              清空分析内容
+            </button>
+            <button
               className={`button gen-report-btn ${generating ? "pausing" : ""}`}
               onClick={generating ? pauseGeneration : generateReport}
               disabled={!generating && Boolean(busy)}
               title={generating ? "点击暂停生成" : "根据报告框架与资源条件生成完整分析报告"}
             >
               <PlayCircle size={15} />
-              {generating ? "暂停生成" : "生成分析报告"}
+              {generating ? "暂停生成" : "生成完整分析报告"}
             </button>
           </div>
         </div>
       </div>
 
+      <div className="mobile-panel-tabs" aria-label="手机面板切换">
+        {mobilePanels.map((item) => {
+          const Icon = item.icon;
+          return (
+            <button
+              key={item.id}
+              className={mobilePanel === item.id ? "active" : ""}
+              onClick={() => setMobilePanel(item.id)}
+            >
+              <Icon size={15} />
+              <span>{item.label}</span>
+            </button>
+          );
+        })}
+      </div>
+
       {/* Row 2: Three columns — Framework | Resources | Preview */}
       <div className="dashboard-body">
-        <div className="panel framework-panel">
+        <div className={`panel framework-panel mobile-panel ${mobilePanel === "framework" ? "mobile-active" : ""}`}>
           <div className="panel-title">
-            <span>报告框架图</span>
+            <span>分析框架</span>
             <button className="icon-button" onClick={addRoot} title="增加一级章节">
               <Plus size={16} />
             </button>
@@ -722,10 +991,10 @@ function Dashboard(props: DashboardProps) {
                   title="是否生成"
                 />
                 <span className="tree-numbering">{numbering}</span>
-                <input
+                <DraftInput
                   className="tree-title"
                   value={node.title}
-                  onChange={(event) => patchNode(node.id, { title: event.target.value })}
+                  onCommit={(value) => patchNode(node.id, { title: value })}
                   onClick={(event) => event.stopPropagation()}
                 />
                 <select
@@ -751,17 +1020,21 @@ function Dashboard(props: DashboardProps) {
           </div>
         </div>
 
-        <ResourcePanel
-          state={state}
-          updateItem={updateSettingItem}
-          addItem={addSettingItem}
-          removeItem={removeSettingItem}
-        />
+        <div className={`resource-panel-shell mobile-panel ${mobilePanel === "resources" ? "mobile-active" : ""}`}>
+          <ResourcePanel
+            state={state}
+            updateItem={updateSettingItem}
+            addItem={addSettingItem}
+            removeItem={removeSettingItem}
+          />
+        </div>
 
-        <div className="panel report-preview-panel">
+        <div className={`panel report-preview-panel mobile-panel ${mobilePanel === "preview" ? "mobile-active" : ""}`}>
           <div className="panel-title">
             <span>分析报告预览</span>
-            <FileText size={18} />
+            <button className="icon-button" onClick={copyGeneratedReport} title="复制已生成分析报告">
+              <Clipboard size={16} />
+            </button>
           </div>
           <div className="report-preview-scroll">
             {flatNodes.filter(({ node }) => node.enabled).length === 0 ? (
@@ -774,19 +1047,33 @@ function Dashboard(props: DashboardProps) {
                 .filter(({ node }) => node.enabled)
                 .map(({ node, level, numbering }) => {
                   const section = state.sections[node.id];
-                  const hasContent = section?.analysisText?.trim();
+                  const body = generatedAnalysisBody(section, node);
                   const conf = confidenceLabel(section?.confidenceScore, node.status);
                   return (
                     <div key={node.id} className={`report-section level-${level}${level === 1 ? " level-1-divider" : ""}`}>
-                      <div className="report-section-head">
-                        <span className="report-numbering">{numbering}</span>
-                        <span className="report-title">{node.title}</span>
-                        <span className={`depth-badge ${depthClass(node.depth)}`}>{node.depth}</span>
+	                      <div className="report-section-head">
+	                        <span className="report-numbering">{numbering}</span>
+	                        <span className="report-title">
+	                          {node.title}
+	                          {section?.status === "generating" && <span className="generating-ellipsis" aria-label="生成中" />}
+	                        </span>
+	                        {level <= 2 && (
+	                          <button
+	                            className="icon-button report-play-btn"
+	                            onClick={() => {
+	                              setActiveSectionId(node.id);
+	                              generateSection(node.id);
+	                            }}
+	                            disabled={Boolean(busy) || generating || node.locked}
+	                            title="单独生成本章节分析报告"
+	                          >
+	                            <PlayCircle size={14} />
+	                          </button>
+	                        )}
+	                        <span className={`depth-badge ${depthClass(node.depth)}`}>{node.depth}</span>
                         <span className={`status ${conf.cls}`}>{conf.text}</span>
                       </div>
-                      {hasContent && (
-                        <div className="report-section-body">{section.analysisText}</div>
-                      )}
+                      {body && <MarkdownPreview text={body} />}
                     </div>
                   );
                 })
@@ -798,17 +1085,57 @@ function Dashboard(props: DashboardProps) {
   );
 }
 
-function Field({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+/**
+ * DraftInput — React 受控输入框，兼容中文/日文/韩文 IME 输入法。
+ * 在 IME 合成过程中（拼音未上屏时）不向父组件提交值，
+ * 只在合成结束（onCompositionEnd）或失焦（onBlur）时才调用 onCommit，
+ * 避免每次按键触发 API 请求导致输入法被打断。
+ */
+function DraftInput({
+  value,
+  onCommit,
+  className,
+  placeholder,
+  onClick
+}: {
+  value: string;
+  onCommit: (value: string) => void;
+  className?: string;
+  placeholder?: string;
+  onClick?: MouseEventHandler<HTMLInputElement>;
+}) {
   const [draft, setDraft] = useState(value);
-  useEffect(() => setDraft(value), [value]);
+  const composingRef = useRef(false);
+
+  // 当外部 state 变化时同步（仅在非 IME 合成期间）
+  useEffect(() => {
+    if (!composingRef.current) setDraft(value);
+  }, [value]);
+
+  return (
+    <input
+      className={className}
+      placeholder={placeholder}
+      value={draft}
+      onClick={onClick}
+      onChange={(event) => setDraft(event.target.value)}
+      onCompositionStart={() => { composingRef.current = true; }}
+      onCompositionEnd={(event) => {
+        composingRef.current = false;
+        onCommit((event.target as HTMLInputElement).value);
+      }}
+      onBlur={() => {
+        if (!composingRef.current) onCommit(draft);
+      }}
+    />
+  );
+}
+
+function Field({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
   return (
     <label>
       {label}
-      <input
-        value={draft}
-        onChange={(event) => setDraft(event.target.value)}
-        onBlur={() => onChange(draft)}
-      />
+      <DraftInput value={value} onCommit={onChange} />
     </label>
   );
 }
@@ -833,12 +1160,12 @@ function ResourcePanel({
   return (
     <div className="panel resource-panel">
       <div className="panel-title">
-        <span>资源与落地要点</span>
+        <span>合作点交叉指引</span>
         <SlidersHorizontal size={18} />
       </div>
       <div className="resource-scroll">
         <ResourceGroup
-          title="我方强资源"
+          title="强资源赋能"
           icon={<Handshake size={16} />}
           items={state.settings.strongResources}
           onAdd={() => addItem("strongResources")}
@@ -872,7 +1199,7 @@ function ResourcePanel({
           )}
         />
         <ResourceGroup
-          title="落地方式"
+          title="落地合作"
           icon={<Target size={16} />}
           items={state.settings.landingMethods}
           onAdd={() => addItem("landingMethods")}
@@ -939,8 +1266,8 @@ function ResourceItem({
   return (
     <div className={`resource-item ${checked ? "enabled" : ""}`}>
       <input type="checkbox" checked={checked} onChange={(event) => onEnabled(event.target.checked)} />
-      <input className="resource-name" value={name} onChange={(event) => onName(event.target.value)} />
-      <input className="resource-note" value={note ?? ""} onChange={(event) => onNote(event.target.value)} placeholder="注解" />
+      <DraftInput className="resource-name" value={name} onCommit={onName} />
+      <DraftInput className="resource-note" value={note ?? ""} onCommit={onNote} placeholder="注解" />
       <button className="icon-button danger" onClick={onRemove} title="删除">
         <Trash2 size={14} />
       </button>
@@ -1176,19 +1503,29 @@ function EditableList<T extends { id: string; name: string }>({
   );
 }
 
-function PromptTextarea({ label, value, onSave }: { label: string; value: string; onSave: (v: string) => void }) {
+function PromptTextarea({ label, value, onSave, rows = 3 }: { label: string; value: string; onSave: (v: string) => void; rows?: number }) {
   const [draft, setDraft] = useState(value);
+  const dirty = draft !== value;
   useEffect(() => setDraft(value), [value]);
   return (
     <div className="prompt-field">
       <div className="prompt-field-label">{label}</div>
       <textarea
-        className="prompt-textarea"
+        className={`prompt-textarea${dirty ? " dirty" : ""}`}
         value={draft}
-        rows={4}
+        rows={3}
         onChange={(e) => setDraft(e.target.value)}
-        onBlur={() => { if (draft !== value) onSave(draft); }}
       />
+      {dirty && (
+        <div className="prompt-field-actions">
+          <button className="button prompt-save-btn" onClick={() => onSave(draft)}>
+            <Check size={13} /> 确认保存
+          </button>
+          <button className="button ghost prompt-cancel-btn" onClick={() => setDraft(value)}>
+            取消
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -1207,8 +1544,9 @@ function PromptEngineeringView({
     saveFramework(updateNode(state.framework, id, { notes }));
   }
   function saveResNote(key: "strongResources" | "landingRegions" | "landingMethods", id: string, notes: string) {
-    const list = (state.settings[key] as Array<{ id: string; notes?: string; [k: string]: unknown }>)
-      .map(item => item.id === id ? { ...item, notes } : item);
+    const list = state.settings[key].map((item: StrongResource | LandingRegion | LandingMethod) =>
+      item.id === id ? { ...item, notes } : item
+    );
     saveSettings({ [key]: list });
   }
   return (
@@ -1226,30 +1564,47 @@ function PromptEngineeringView({
         />
       </section>
       <section className="prompt-section">
+        <div className="prompt-section-title">分析深度定义</div>
+        <p className="prompt-section-desc">三种深度的输出规则，AI 生成时按章节的深度设定严格执行。三栏并排编辑，修改后点击「确认保存」生效。</p>
+        <div className="depth-instructions-grid">
+          {(["简版", "标准", "深入"] as const).map((depth) => (
+            <PromptTextarea
+              key={depth}
+              label={depth}
+              value={state.promptEngineering?.depthInstructions?.[depth] ?? ""}
+              onSave={(v) => savePromptEngineering({ depthInstructions: { ...state.promptEngineering?.depthInstructions, [depth]: v } })}
+              rows={10}
+            />
+          ))}
+        </div>
+      </section>
+      <section className="prompt-section">
         <div className="prompt-section-title">报告章节提示词</div>
         {level1Nodes.map(({ node: l1, numbering: n1 }) => {
           const children = flatNodes.filter(({ node: l2, level }) =>
             level === 2 && state.framework.some(top =>
               top.id === l1.id && (top.children ?? []).some(c => c.id === l2.id)));
           return (
-            <div key={l1.id} className="prompt-chapter-group">
+            <div key={l1.id} className="prompt-chapter-group two-col">
               <div className="prompt-chapter-label">{n1}&nbsp;&nbsp;{l1.title}</div>
-              {children.length > 0
-                ? children.map(({ node: l2, numbering: n2 }) => (
-                    <PromptTextarea key={l2.id} label={`${n2}  ${l2.title}`}
-                      value={l2.notes ?? ""} onSave={(v) => saveNodeNote(l2.id, v)} />
-                  ))
-                : <PromptTextarea label={`${n1}  ${l1.title}`}
-                    value={l1.notes ?? ""} onSave={(v) => saveNodeNote(l1.id, v)} />
-              }
+              <div className="prompt-fields-grid">
+                {children.length > 0
+                  ? children.map(({ node: l2, numbering: n2 }) => (
+                      <PromptTextarea key={l2.id} label={`${n2}  ${l2.title}`}
+                        value={l2.notes ?? ""} onSave={(v) => saveNodeNote(l2.id, v)} />
+                    ))
+                  : <PromptTextarea label={`${n1}  ${l1.title}`}
+                      value={l1.notes ?? ""} onSave={(v) => saveNodeNote(l1.id, v)} />
+                }
+              </div>
             </div>
           );
         })}
       </section>
       <section className="prompt-section">
-        <div className="prompt-section-title">资源与落地要点提示词</div>
+        <div className="prompt-section-title">合作点交叉指引提示词</div>
         <div className="prompt-chapter-group">
-          <div className="prompt-chapter-label">我方强资源</div>
+          <div className="prompt-chapter-label">强资源赋能</div>
           {state.settings.strongResources.filter(r => r.enabled).map(r => (
             <PromptTextarea key={r.id} label={r.name} value={r.notes ?? ""}
               onSave={(v) => saveResNote("strongResources", r.id, v)} />
@@ -1263,7 +1618,7 @@ function PromptEngineeringView({
           ))}
         </div>
         <div className="prompt-chapter-group">
-          <div className="prompt-chapter-label">落地方式</div>
+          <div className="prompt-chapter-label">落地合作</div>
           {state.settings.landingMethods.filter(m => m.enabled).map(m => (
             <PromptTextarea key={m.id} label={m.name} value={m.notes ?? ""}
               onSave={(v) => saveResNote("landingMethods", m.id, v)} />

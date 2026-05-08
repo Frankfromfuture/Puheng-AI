@@ -1,4 +1,4 @@
-export type AnalysisDepth = "简版" | "标准" | "深入" | "专项";
+export type AnalysisDepth = "简版" | "标准" | "深入";
 export type ResearchRequirement =
   | "brief"
   | "fundamental"
@@ -119,8 +119,15 @@ export interface Project {
   description: string;
 }
 
+export interface DepthInstructions {
+  简版: string;
+  标准: string;
+  深入: string;
+}
+
 export interface PromptEngineering {
   globalStyle: string;
+  depthInstructions: DepthInstructions;
 }
 
 export interface AppState {
