@@ -7,16 +7,20 @@ import {
   Download,
   FileText,
   GripVertical,
+  Handshake,
   KeyRound,
   Layers3,
   Lock,
+  MapPin,
   PencilLine,
   Plus,
   RefreshCcw,
   Save,
   Settings as SettingsIcon,
   ShieldCheck,
+  SlidersHorizontal,
   Sparkles,
+  Target,
   Trash2,
   Unlock,
   Upload,
@@ -32,6 +36,7 @@ import type {
   LandingMethod,
   LandingRegion,
   ReportNode,
+  ResearchRequirement,
   SectionStatus,
   Settings,
   StrongResource
@@ -88,6 +93,15 @@ async function request<T>(url: string, init: RequestInit = {}): Promise<T> {
 }
 
 const depthOptions: AnalysisDepth[] = ["简版", "标准", "深入", "专项"];
+
+const requirementOptions: Array<{ id: ResearchRequirement; label: string; focus: string }> = [
+  { id: "brief", label: "简要分析", focus: "所有框架均简单分析" },
+  { id: "fundamental", label: "基本面深度分析", focus: "企业基本面深入，其余相应变化" },
+  { id: "investment", label: "投资合作分析", focus: "产业分析与资本分析重点" },
+  { id: "landing", label: "招商落地分析", focus: "产业分析与区域交叉分析重点" },
+  { id: "enablement", label: "赋能合作分析", focus: "资源复合与赋能分析重点" },
+  { id: "comprehensive", label: "全面分析", focus: "所有重点展开" }
+];
 
 const statusText: Record<SectionStatus, string> = {
   not_started: "未生成",
@@ -182,6 +196,13 @@ function confidenceLabel(section?: AnalysisSection) {
   return `置信度：${section.confidenceScore}%｜${section.confidenceReason || "暂无说明"}｜资料覆盖：${section.sourceCoverage || "未说明"}`;
 }
 
+function depthClass(depth: AnalysisDepth) {
+  if (depth === "深入") return "deep";
+  if (depth === "简版") return "simple";
+  if (depth === "专项") return "special";
+  return "standard";
+}
+
 export default function App() {
   const [state, setState] = useState<AppState | null>(null);
   const [activeView, setActiveView] = useState<"dashboard" | "settings" | "files">("dashboard");
@@ -251,7 +272,7 @@ export default function App() {
 
   async function generateSection(id: string) {
     if (!state?.settings.qwen.apiKeyConfigured) {
-      setMessage("请先在设置菜单配置 Qwen API Key 并测试连接。");
+      setMessage("请先在设置菜单配置模型 API Key 并测试连接。");
       return;
     }
     const saved = await withBusy("生成章节", () => api.draftSection(id));
@@ -309,11 +330,11 @@ export default function App() {
           </button>
         </nav>
         <div className="sidebar-card">
-          <span>Qwen 状态</span>
+          <span>模型状态</span>
           <strong className={state.settings.qwen.apiKeyConfigured ? "ok" : "warn"}>
             {state.settings.qwen.apiKeyConfigured ? "已配置" : "未配置"}
           </strong>
-          <p>{state.settings.qwen.model} · {state.settings.qwen.region}</p>
+          <p>{state.settings.qwen.provider === "opensearch" ? "OpenSearch" : "DashScope"} · {state.settings.qwen.model}</p>
         </div>
         <div className="sidebar-card">
           <span>已确认章节</span>
@@ -354,6 +375,7 @@ export default function App() {
             setActiveSectionId={setActiveSectionId}
             saveFramework={saveFramework}
             saveProject={saveProject}
+            saveSettings={saveSettings}
             saveSection={saveSection}
             generateSection={generateSection}
             confirmSection={confirmSection}
@@ -383,8 +405,8 @@ export default function App() {
             setApiKeyDraft={setApiKeyDraft}
             saveSettings={saveSettings}
             testQwen={async () => {
-              const result = await withBusy("测试 Qwen", () => api.testQwen());
-              if (result) setMessage("Qwen 连接测试成功。");
+              const result = await withBusy("测试模型", () => api.testQwen());
+              if (result) setMessage("模型连接测试成功。");
             }}
           />
         )}
@@ -404,6 +426,7 @@ interface DashboardProps {
   setActiveSectionId: (id: string) => void;
   saveFramework: (framework: ReportNode[]) => Promise<void>;
   saveProject: (project: Partial<AppState["project"]>) => Promise<void>;
+  saveSettings: (payload: Partial<Settings> | Record<string, unknown>) => Promise<void>;
   saveSection: (id: string, patch: Partial<AnalysisSection>) => Promise<void>;
   generateSection: (id: string) => Promise<void>;
   confirmSection: (id: string) => Promise<void>;
@@ -423,6 +446,7 @@ function Dashboard(props: DashboardProps) {
     setActiveSectionId,
     saveFramework,
     saveProject,
+    saveSettings,
     saveSection,
     generateSection,
     confirmSection,
@@ -453,29 +477,64 @@ function Dashboard(props: DashboardProps) {
     setDragId("");
   }
 
+  function updateSettingItem<T extends StrongResource | LandingRegion | LandingMethod>(
+    key: "strongResources" | "landingRegions" | "landingMethods",
+    id: string,
+    patch: Partial<T>
+  ) {
+    const list = (state.settings[key] as T[]).map((item) => (item.id === id ? { ...item, ...patch } : item));
+    return saveSettings({ [key]: list });
+  }
+
+  function addSettingItem(key: "strongResources" | "landingRegions" | "landingMethods") {
+    const id = `custom-${key}-${Date.now()}`;
+    const base =
+      key === "landingRegions"
+        ? { id, name: "自定义区域", enabled: true, industries: "", resources: "", constraints: "", notes: "" }
+        : key === "landingMethods"
+          ? { id, name: "自定义方式", enabled: true, notes: "" }
+          : { id, name: "自定义强资源", type: "自定义", enabled: true, notes: "" };
+    return saveSettings({ [key]: [...(state.settings[key] as unknown[]), base] });
+  }
+
+  function removeSettingItem(key: "strongResources" | "landingRegions" | "landingMethods", id: string) {
+    return saveSettings({ [key]: (state.settings[key] as Array<{ id: string }>).filter((item) => item.id !== id) });
+  }
+
   return (
     <section className="dashboard-grid">
-      <div className="panel project-panel">
+      <div className="panel project-panel command-panel">
         <div className="panel-title">
-          <span>项目建档</span>
-          <ShieldCheck size={18} />
+          <span>研究入口</span>
+          <Target size={18} />
         </div>
-        <div className="form-grid">
-          <Field label="企业名称" value={state.project.companyName} onChange={(companyName) => saveProject({ companyName })} />
-          <Field label="股票代码" value={state.project.stockCode} onChange={(stockCode) => saveProject({ stockCode })} />
-          <Field label="统一社会信用代码" value={state.project.creditCode} onChange={(creditCode) => saveProject({ creditCode })} />
-          <Field label="行业" value={state.project.industry} onChange={(industry) => saveProject({ industry })} />
-          <Field label="地区" value={state.project.region} onChange={(region) => saveProject({ region })} />
+        <div className="command-row">
+          <Field label="公司名称" value={state.project.companyName} onChange={(companyName) => saveProject({ companyName })} />
+          <div className="model-token">
+            <span>当前模型</span>
+            <strong>{state.settings.qwen.model}</strong>
+          </div>
         </div>
-        <label className="textarea-label">
-          企业/合作背景补充
-          <textarea
-            value={state.project.description}
-            onChange={(event) => saveProject({ description: event.target.value })}
-            placeholder="补充业务、合作背景、重点关注问题..."
-          />
-        </label>
+        <div className="requirement-grid" aria-label="研究要求">
+          {requirementOptions.map((option) => (
+            <button
+              key={option.id}
+              className={state.project.researchRequirement === option.id ? "selected" : ""}
+              onClick={() => saveProject({ researchRequirement: option.id })}
+            >
+              <strong>{option.label}</strong>
+              <span>{option.focus}</span>
+            </button>
+          ))}
+        </div>
       </div>
+
+      <ResourcePanel
+        state={state}
+        updateItem={updateSettingItem}
+        addItem={addSettingItem}
+        removeItem={removeSettingItem}
+      />
 
       <div className="panel framework-panel">
         <div className="panel-title">
@@ -498,6 +557,7 @@ function Dashboard(props: DashboardProps) {
             >
               <GripVertical size={15} className="drag" />
               <input
+                className="tree-check"
                 type="checkbox"
                 checked={node.enabled}
                 onChange={(event) => patchNode(node.id, { enabled: event.target.checked })}
@@ -511,6 +571,7 @@ function Dashboard(props: DashboardProps) {
                 onClick={(event) => event.stopPropagation()}
               />
               <select
+                className={`depth-badge ${depthClass(node.depth)}`}
                 value={node.depth}
                 onChange={(event) => patchNode(node.id, { depth: event.target.value as AnalysisDepth })}
                 onClick={(event) => event.stopPropagation()}
@@ -519,14 +580,6 @@ function Dashboard(props: DashboardProps) {
                   <option key={depth}>{depth}</option>
                 ))}
               </select>
-              <label className="mini-check" onClick={(event) => event.stopPropagation()}>
-                <input
-                  type="checkbox"
-                  checked={node.includeInWord}
-                  onChange={(event) => patchNode(node.id, { includeInWord: event.target.checked })}
-                />
-                入 Word
-              </label>
               <span className={`status ${statusClass[node.status]}`}>{statusText[node.status]}</span>
               {node.locked && <Lock size={14} className="lock" />}
               <button className="icon-button" onClick={(event) => { event.stopPropagation(); addSubsection(node.id); }} title="增加二级章节">
@@ -557,7 +610,7 @@ function Dashboard(props: DashboardProps) {
                 ) : (
                   <>
                     <button className="button ghost" onClick={() => generateSection(activeSection.id)} disabled={Boolean(busy)}>
-                      <RefreshCcw size={16} /> Qwen 生成
+                      <RefreshCcw size={16} /> 模型生成
                     </button>
                     <button className="button primary" onClick={() => confirmSection(activeSection.id)} disabled={Boolean(busy)}>
                       <Check size={16} /> 确认本节
@@ -575,6 +628,28 @@ function Dashboard(props: DashboardProps) {
                   disabled={activeSection.locked}
                   onChange={(event) => patchNode(activeNode.id, { notes: event.target.value })}
                   placeholder="例如：重点看基金出资与合作基金可能性"
+                />
+              </label>
+              <label>
+                研究深度
+                <select
+                  className={`depth-input ${depthClass(activeNode.depth)}`}
+                  value={activeNode.depth}
+                  disabled={activeSection.locked}
+                  onChange={(event) => patchNode(activeNode.id, { depth: event.target.value as AnalysisDepth })}
+                >
+                  {depthOptions.map((depth) => (
+                    <option key={depth}>{depth}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="word-toggle">
+                进入 Word
+                <input
+                  type="checkbox"
+                  checked={activeNode.includeInWord}
+                  disabled={activeSection.locked}
+                  onChange={(event) => patchNode(activeNode.id, { includeInWord: event.target.checked })}
                 />
               </label>
               <label>
@@ -605,7 +680,7 @@ function Dashboard(props: DashboardProps) {
                 value={activeSection.analysisText}
                 disabled={activeSection.locked}
                 onChange={(event) => saveSection(activeSection.id, { analysisText: event.target.value })}
-                placeholder="Qwen 生成后可在这里微调；也可以先手工输入再确认。"
+                placeholder="模型生成后可在这里微调；也可以先手工输入再确认。"
               />
             </label>
           </>
@@ -635,6 +710,139 @@ function Field({ label, value, onChange }: { label: string; value: string; onCha
         onBlur={() => onChange(draft)}
       />
     </label>
+  );
+}
+
+type ResourceKey = "strongResources" | "landingRegions" | "landingMethods";
+
+function ResourcePanel({
+  state,
+  updateItem,
+  addItem,
+  removeItem
+}: {
+  state: AppState;
+  updateItem: <T extends StrongResource | LandingRegion | LandingMethod>(
+    key: ResourceKey,
+    id: string,
+    patch: Partial<T>
+  ) => Promise<void>;
+  addItem: (key: ResourceKey) => Promise<void>;
+  removeItem: (key: ResourceKey, id: string) => Promise<void>;
+}) {
+  return (
+    <div className="panel resource-panel">
+      <div className="panel-title">
+        <span>资源与落地要点</span>
+        <SlidersHorizontal size={18} />
+      </div>
+      <ResourceGroup
+        title="我方强资源"
+        icon={<Handshake size={16} />}
+        items={state.settings.strongResources}
+        onAdd={() => addItem("strongResources")}
+        render={(item: StrongResource) => (
+          <ResourceItem
+            checked={item.enabled}
+            name={item.name}
+            note={item.notes}
+            onEnabled={(enabled) => updateItem<StrongResource>("strongResources", item.id, { enabled })}
+            onName={(name) => updateItem<StrongResource>("strongResources", item.id, { name })}
+            onNote={(notes) => updateItem<StrongResource>("strongResources", item.id, { notes })}
+            onRemove={() => removeItem("strongResources", item.id)}
+          />
+        )}
+      />
+      <ResourceGroup
+        title="重点落地区域"
+        icon={<MapPin size={16} />}
+        items={state.settings.landingRegions}
+        onAdd={() => addItem("landingRegions")}
+        render={(item: LandingRegion) => (
+          <ResourceItem
+            checked={item.enabled}
+            name={item.name}
+            note={item.notes ?? ""}
+            onEnabled={(enabled) => updateItem<LandingRegion>("landingRegions", item.id, { enabled })}
+            onName={(name) => updateItem<LandingRegion>("landingRegions", item.id, { name })}
+            onNote={(notes) => updateItem<LandingRegion>("landingRegions", item.id, { notes })}
+            onRemove={() => removeItem("landingRegions", item.id)}
+          />
+        )}
+      />
+      <ResourceGroup
+        title="落地方式"
+        icon={<Target size={16} />}
+        items={state.settings.landingMethods}
+        onAdd={() => addItem("landingMethods")}
+        render={(item: LandingMethod) => (
+          <ResourceItem
+            checked={item.enabled}
+            name={item.name}
+            note={item.notes}
+            onEnabled={(enabled) => updateItem<LandingMethod>("landingMethods", item.id, { enabled })}
+            onName={(name) => updateItem<LandingMethod>("landingMethods", item.id, { name })}
+            onNote={(notes) => updateItem<LandingMethod>("landingMethods", item.id, { notes })}
+            onRemove={() => removeItem("landingMethods", item.id)}
+          />
+        )}
+      />
+    </div>
+  );
+}
+
+function ResourceGroup<T extends { id: string }>({
+  title,
+  icon,
+  items,
+  onAdd,
+  render
+}: {
+  title: string;
+  icon: ReactNode;
+  items: T[];
+  onAdd: () => void;
+  render: (item: T) => ReactNode;
+}) {
+  return (
+    <section className="resource-group">
+      <header>
+        <span>{icon}{title}</span>
+        <button className="icon-button" onClick={onAdd} title="增加自定义项">
+          <Plus size={15} />
+        </button>
+      </header>
+      <div className="resource-list">{items.map((item) => <div key={item.id}>{render(item)}</div>)}</div>
+    </section>
+  );
+}
+
+function ResourceItem({
+  checked,
+  name,
+  note,
+  onEnabled,
+  onName,
+  onNote,
+  onRemove
+}: {
+  checked: boolean;
+  name: string;
+  note?: string;
+  onEnabled: (enabled: boolean) => void;
+  onName: (name: string) => void;
+  onNote: (note: string) => void;
+  onRemove: () => void;
+}) {
+  return (
+    <div className={`resource-item ${checked ? "enabled" : ""}`}>
+      <input type="checkbox" checked={checked} onChange={(event) => onEnabled(event.target.checked)} />
+      <input className="resource-name" value={name} onChange={(event) => onName(event.target.value)} />
+      <input className="resource-note" value={note ?? ""} onChange={(event) => onNote(event.target.value)} placeholder="注解" />
+      <button className="icon-button danger" onClick={onRemove} title="删除">
+        <Trash2 size={14} />
+      </button>
+    </div>
   );
 }
 
@@ -799,10 +1007,20 @@ function SettingsView({
     <section className="settings-grid">
       <div className="panel">
         <div className="panel-title">
-          <span>Qwen API</span>
+          <span>模型 API</span>
           <KeyRound size={18} />
         </div>
         <div className="settings-form">
+          <label>
+            模型来源
+            <select
+              value={qwen.provider}
+              onChange={(event) => saveSettings({ qwen: { provider: event.target.value } })}
+            >
+              <option value="opensearch">OpenSearch / AI 搜索开放平台</option>
+              <option value="dashscope">DashScope / OpenAI-compatible</option>
+            </select>
+          </label>
           <label>
             API Key
             <div className="inline-control">
@@ -820,20 +1038,43 @@ function SettingsView({
               </button>
             </div>
           </label>
-          <label>
-            Base URL
-            <input
-              value={qwen.baseUrl}
-              onChange={(event) => saveSettings({ qwen: { baseUrl: event.target.value } })}
-            />
-          </label>
-          <label>
-            Responses Base URL
-            <input
-              value={qwen.responsesBaseUrl}
-              onChange={(event) => saveSettings({ qwen: { responsesBaseUrl: event.target.value } })}
-            />
-          </label>
+          {qwen.provider === "opensearch" ? (
+            <>
+              <label>
+                OpenSearch Host
+                <input
+                  value={qwen.openSearchHost}
+                  onChange={(event) => saveSettings({ qwen: { openSearchHost: event.target.value } })}
+                  placeholder="https://default-hea5.platform-cn-shanghai.opensearch.aliyuncs.com"
+                />
+              </label>
+              <label>
+                工作空间 / workspace
+                <input
+                  value={qwen.openSearchAppName}
+                  onChange={(event) => saveSettings({ qwen: { openSearchAppName: event.target.value } })}
+                  placeholder="例如 default"
+                />
+              </label>
+            </>
+          ) : (
+            <>
+              <label>
+                Base URL
+                <input
+                  value={qwen.baseUrl}
+                  onChange={(event) => saveSettings({ qwen: { baseUrl: event.target.value } })}
+                />
+              </label>
+              <label>
+                Responses Base URL
+                <input
+                  value={qwen.responsesBaseUrl}
+                  onChange={(event) => saveSettings({ qwen: { responsesBaseUrl: event.target.value } })}
+                />
+              </label>
+            </>
+          )}
           <div className="form-grid">
             <label>
               模型
@@ -861,51 +1102,6 @@ function SettingsView({
             <input value={item.name} onChange={(event) => updateResource("externalApis", item.id, { name: event.target.value })} />
             <input value={item.endpoint} onChange={(event) => updateResource("externalApis", item.id, { endpoint: event.target.value })} placeholder="API 或公开入口地址" />
             <input value={item.notes} onChange={(event) => updateResource("externalApis", item.id, { notes: event.target.value })} placeholder="用途说明" />
-          </>
-        )}
-      />
-
-      <EditableList
-        title="我方强资源"
-        icon={<UsersRound size={18} />}
-        items={state.settings.strongResources}
-        onAdd={() => addResource("strongResources")}
-        render={(item: StrongResource) => (
-          <>
-            <input type="checkbox" checked={item.enabled} onChange={(event) => updateResource("strongResources", item.id, { enabled: event.target.checked })} />
-            <input value={item.name} onChange={(event) => updateResource("strongResources", item.id, { name: event.target.value })} />
-            <input value={item.type} onChange={(event) => updateResource("strongResources", item.id, { type: event.target.value })} />
-            <input value={item.notes} onChange={(event) => updateResource("strongResources", item.id, { notes: event.target.value })} />
-          </>
-        )}
-      />
-
-      <EditableList
-        title="重点落地区域"
-        icon={<Layers3 size={18} />}
-        items={state.settings.landingRegions}
-        onAdd={() => addResource("landingRegions")}
-        render={(item: LandingRegion) => (
-          <>
-            <input type="checkbox" checked={item.enabled} onChange={(event) => updateResource("landingRegions", item.id, { enabled: event.target.checked })} />
-            <input value={item.name} onChange={(event) => updateResource("landingRegions", item.id, { name: event.target.value })} />
-            <input value={item.industries} onChange={(event) => updateResource("landingRegions", item.id, { industries: event.target.value })} />
-            <input value={item.resources} onChange={(event) => updateResource("landingRegions", item.id, { resources: event.target.value })} />
-            <input value={item.constraints} onChange={(event) => updateResource("landingRegions", item.id, { constraints: event.target.value })} />
-          </>
-        )}
-      />
-
-      <EditableList
-        title="落地方式"
-        icon={<ChevronDown size={18} />}
-        items={state.settings.landingMethods}
-        onAdd={() => addResource("landingMethods")}
-        render={(item: LandingMethod) => (
-          <>
-            <input type="checkbox" checked={item.enabled} onChange={(event) => updateResource("landingMethods", item.id, { enabled: event.target.checked })} />
-            <input value={item.name} onChange={(event) => updateResource("landingMethods", item.id, { name: event.target.value })} />
-            <input value={item.notes} onChange={(event) => updateResource("landingMethods", item.id, { notes: event.target.value })} />
           </>
         )}
       />

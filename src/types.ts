@@ -1,4 +1,11 @@
 export type AnalysisDepth = "简版" | "标准" | "深入" | "专项";
+export type ResearchRequirement =
+  | "brief"
+  | "fundamental"
+  | "investment"
+  | "landing"
+  | "enablement"
+  | "comprehensive";
 export type SectionStatus =
   | "not_started"
   | "generating"
@@ -65,6 +72,7 @@ export interface LandingRegion {
   industries: string;
   resources: string;
   constraints: string;
+  notes?: string;
 }
 
 export interface LandingMethod {
@@ -78,8 +86,11 @@ export interface Settings {
   qwen: {
     apiKeyConfigured: boolean;
     apiKeyPreview?: string;
+    provider: "dashscope" | "opensearch";
     baseUrl: string;
     responsesBaseUrl: string;
+    openSearchHost: string;
+    openSearchAppName: string;
     model: string;
     region: string;
   };
@@ -100,6 +111,7 @@ export interface UploadedFile {
 export interface Project {
   id: string;
   companyName: string;
+  researchRequirement: ResearchRequirement;
   stockCode: string;
   creditCode: string;
   industry: string;
@@ -114,4 +126,5 @@ export interface AppState {
   sections: Record<string, AnalysisSection>;
   files: UploadedFile[];
   sources: Citation[];
+  meta?: Record<string, boolean | string | number>;
 }

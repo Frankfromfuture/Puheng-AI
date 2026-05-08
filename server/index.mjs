@@ -36,6 +36,91 @@ app.use(express.json({ limit: "10mb" }));
 app.use("/exports", express.static(EXPORT_DIR));
 
 const depths = ["简版", "标准", "深入", "专项"];
+const knownDefaultNoteIds = new Set([
+  "tsinghua-companies",
+  "shanghai-soe",
+  "shanghai-medical",
+  "qingpu",
+  "longhua",
+  "qingpu-region",
+  "longhua-region",
+  "attraction",
+  "land",
+  "lease",
+  "coop-fund",
+  "industry-fund",
+  "medical",
+  "soe"
+]);
+
+const researchRequirements = {
+  brief: {
+    label: "简要分析",
+    instruction: "所有框架只做简单判断，压缩背景铺陈，优先输出可核实结论、缺口与引用。"
+  },
+  fundamental: {
+    label: "基本面深度分析",
+    instruction: "企业基本面、工商股东、公告年报、财务与经营质量深入，其余章节配合基本面结论简化。"
+  },
+  investment: {
+    label: "投资合作分析",
+    instruction: "产业链位置、竞争格局、资本合作、融资估值、投资方与合作基金线索为重点。"
+  },
+  landing: {
+    label: "招商落地分析",
+    instruction: "产业链位置与区域资源交叉为重点，突出招商引资、空间载体、租赁/拿地与 90 天路径。"
+  },
+  enablement: {
+    label: "赋能合作分析",
+    instruction: "我方强资源、企业需求、合作抓手、资源复合与赋能路径为重点。"
+  },
+  comprehensive: {
+    label: "全面分析",
+    instruction: "所有重点章节均展开分析，基础、市场、资本、赋能、落地与风险均需形成可执行判断。"
+  }
+};
+
+function depthForRequirement(requirement, nodeId, parentId) {
+  const mode = researchRequirements[requirement] ? requirement : "comprehensive";
+  const group = parentId || nodeId;
+  if (mode === "brief") return "简版";
+  if (mode === "comprehensive") {
+    if (["capital-cooperation", "enablement", "landing-plan"].includes(group)) return "专项";
+    return "深入";
+  }
+  if (mode === "fundamental") {
+    if (group === "basic") return "深入";
+    if (group === "market-position" || group === "risks") return "标准";
+    return "简版";
+  }
+  if (mode === "investment") {
+    if (group === "capital-cooperation") return "专项";
+    if (group === "market-position") return "深入";
+    if (group === "basic" || group === "risks") return "标准";
+    return "简版";
+  }
+  if (mode === "landing") {
+    if (group === "landing-plan") return "专项";
+    if (group === "market-position") return "深入";
+    if (group === "enablement" || group === "risks") return "标准";
+    return "简版";
+  }
+  if (mode === "enablement") {
+    if (group === "enablement") return "专项";
+    if (group === "market-position" || group === "landing-plan") return "标准";
+    if (group === "risks") return "标准";
+    return "简版";
+  }
+  return "标准";
+}
+
+function applyResearchDepths(nodes, requirement, parentId = null) {
+  return nodes.map((item) => ({
+    ...item,
+    depth: depthForRequirement(requirement, item.id, parentId),
+    children: applyResearchDepths(item.children ?? [], requirement, parentId || item.id)
+  }));
+}
 
 function node(id, title, children = [], depth = "标准") {
   return {
@@ -164,6 +249,7 @@ function defaultState() {
     project: {
       id: "default-project",
       companyName: "",
+      researchRequirement: "comprehensive",
       stockCode: "",
       creditCode: "",
       industry: "",
@@ -173,8 +259,11 @@ function defaultState() {
     settings: {
       qwen: {
         apiKey: "",
+        provider: "dashscope",
         baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
         responsesBaseUrl: "https://dashscope.aliyuncs.com/api/v2/apps/protocols/compatible-mode/v1",
+        openSearchHost: "https://default-hea5.platform-cn-shanghai.opensearch.aliyuncs.com",
+        openSearchAppName: "default",
         model: "qwen-plus",
         region: "中国大陆（北京）"
       },
@@ -221,35 +310,35 @@ function defaultState() {
           name: "清华系相关企业",
           type: "产业/校友资源",
           enabled: true,
-          notes: "适合产业协同、技术背书、客户转介。"
+          notes: ""
         },
         {
           id: "shanghai-soe",
           name: "上海重要国央企",
           type: "产业客户/资本资源",
           enabled: true,
-          notes: "适合场景合作、联合投资、订单验证。"
+          notes: ""
         },
         {
           id: "shanghai-medical",
           name: "上海市医疗系统",
           type: "医疗场景",
           enabled: true,
-          notes: "适合医疗器械、数字医疗、AI 医疗、临床验证。"
+          notes: ""
         },
         {
           id: "qingpu",
           name: "上海青浦区",
           type: "区域落地",
           enabled: true,
-          notes: "适合长三角、上海产业导入、招商引资。"
+          notes: ""
         },
         {
           id: "longhua",
           name: "深圳龙华区",
           type: "区域落地",
           enabled: true,
-          notes: "适合智能制造、电子信息、深圳产业生态。"
+          notes: ""
         }
       ],
       landingRegions: [
@@ -257,27 +346,29 @@ function defaultState() {
           id: "qingpu-region",
           name: "上海青浦区",
           enabled: true,
-          industries: "长三角一体化、数字经济、医疗健康、先进制造",
-          resources: "招商载体、上海国央企、医疗系统、产业基金协同",
-          constraints: "需核实土地、租赁空间、政策口径与企业资质匹配。"
+          industries: "",
+          resources: "",
+          constraints: "",
+          notes: ""
         },
         {
           id: "longhua-region",
           name: "深圳龙华区",
           enabled: true,
-          industries: "电子信息、智能制造、AI 应用、机器人、新能源配套",
-          resources: "深圳产业链、制造场景、创新载体、基金与招商资源",
-          constraints: "需核实空间载体、研发/制造比例、当地扶持门槛。"
+          industries: "",
+          resources: "",
+          constraints: "",
+          notes: ""
         }
       ],
       landingMethods: [
-        { id: "attraction", name: "招商引资", enabled: true, notes: "适合总部、研发中心、生产基地落地。" },
-        { id: "land", name: "合作拿地", enabled: true, notes: "适合有明确产值、税收、产能规划的企业。" },
-        { id: "lease", name: "租赁落地", enabled: true, notes: "适合轻资产研发、销售总部、医疗/AI 应用团队。" },
-        { id: "coop-fund", name: "合作基金", enabled: true, notes: "适合与区域、国央企或产业方联合设立基金。" },
-        { id: "industry-fund", name: "产业基金投资", enabled: true, notes: "适合融资需求明确且产业协同强的项目。" },
-        { id: "medical", name: "医疗系统合作", enabled: true, notes: "适合临床验证、医院场景、医工转化。" },
-        { id: "soe", name: "国央企合作", enabled: true, notes: "适合订单、场景、基金、并购或联合解决方案。" }
+        { id: "attraction", name: "招商引资", enabled: true, notes: "" },
+        { id: "land", name: "合作拿地", enabled: true, notes: "" },
+        { id: "lease", name: "租赁落地", enabled: true, notes: "" },
+        { id: "coop-fund", name: "合作基金", enabled: true, notes: "" },
+        { id: "industry-fund", name: "产业基金投资", enabled: true, notes: "" },
+        { id: "medical", name: "医疗系统合作", enabled: true, notes: "" },
+        { id: "soe", name: "国央企合作", enabled: true, notes: "" }
       ]
     },
     framework,
@@ -306,7 +397,10 @@ async function ensureStorage() {
 async function readState() {
   await ensureStorage();
   const raw = await fs.readFile(STATE_FILE, "utf8");
-  return JSON.parse(raw);
+  const state = JSON.parse(raw);
+  const changed = migrateState(state);
+  if (changed) await writeState(state);
+  return state;
 }
 
 async function writeState(state) {
@@ -314,7 +408,41 @@ async function writeState(state) {
   await fs.writeFile(STATE_FILE, JSON.stringify(state, null, 2), "utf8");
 }
 
+function migrateState(state) {
+  let changed = false;
+  state.project ??= {};
+  if (!state.project.researchRequirement) {
+    state.project.researchRequirement = "comprehensive";
+    changed = true;
+  }
+  state.meta ??= {};
+  if (!state.meta.blankDefaultAnnotationsV1) {
+    for (const item of state.settings?.strongResources ?? []) {
+      if (knownDefaultNoteIds.has(item.id)) item.notes = "";
+    }
+    for (const item of state.settings?.landingMethods ?? []) {
+      if (knownDefaultNoteIds.has(item.id)) item.notes = "";
+    }
+    for (const item of state.settings?.landingRegions ?? []) {
+      if (knownDefaultNoteIds.has(item.id)) {
+        item.industries = "";
+        item.resources = "";
+        item.constraints = "";
+        item.notes = "";
+      }
+    }
+    state.meta.blankDefaultAnnotationsV1 = true;
+    changed = true;
+  }
+  return changed;
+}
+
 function publicState(state) {
+  state.settings.qwen.provider ??= "dashscope";
+  state.settings.qwen.baseUrl ??= "https://dashscope.aliyuncs.com/compatible-mode/v1";
+  state.settings.qwen.responsesBaseUrl ??= "https://dashscope.aliyuncs.com/api/v2/apps/protocols/compatible-mode/v1";
+  state.settings.qwen.openSearchHost ??= "https://default-hea5.platform-cn-shanghai.opensearch.aliyuncs.com";
+  state.settings.qwen.openSearchAppName ??= "default";
   return {
     ...state,
     settings: {
@@ -401,6 +529,7 @@ function normalizeDraft(raw, reportNode) {
 }
 
 function buildSectionPrompt(state, reportNode) {
+  const requirement = researchRequirements[state.project.researchRequirement] ?? researchRequirements.comprehensive;
   const flat = flatten(state.framework)
     .filter((item) => item.enabled)
     .map((item) => `${"  ".repeat(item.level - 1)}- ${item.title}（深度：${item.depth}）`)
@@ -411,7 +540,7 @@ function buildSectionPrompt(state, reportNode) {
     .join("\n");
   const regions = state.settings.landingRegions
     .filter((item) => item.enabled)
-    .map((item) => `${item.name}：产业方向 ${item.industries}；资源 ${item.resources}；限制 ${item.constraints}`)
+    .map((item) => `${item.name}${item.notes ? `：${item.notes}` : ""}`)
     .join("\n");
   const methods = state.settings.landingMethods
     .filter((item) => item.enabled)
@@ -434,11 +563,9 @@ function buildSectionPrompt(state, reportNode) {
 
 当前企业：
 企业名称：${state.project.companyName || "未填写"}
-股票代码：${state.project.stockCode || "未填写"}
-统一社会信用代码：${state.project.creditCode || "未填写"}
-行业：${state.project.industry || "未填写"}
-地区：${state.project.region || "未填写"}
-补充说明：${state.project.description || "无"}
+研究要求：${requirement.label}
+研究要求解释：${requirement.instruction}
+如果企业名称是简称、别名或不完整名称，请基于公开资料做最佳可能性判断；无法确认的身份、主体、证券代码、工商信息必须进入 missingInfo，不得当作确定事实。
 
 当前要生成的章节：
 章节 ID：${reportNode.id}
@@ -488,12 +615,88 @@ ${sources}
   ];
 }
 
-async function callQwenForSection(state, reportNode) {
-  const { apiKey, baseUrl, model } = state.settings.qwen;
+function messagesToPrompt(messages) {
+  return messages
+    .map((message) => `${message.role === "system" ? "系统规则" : "用户任务"}：\n${message.content}`)
+    .join("\n\n");
+}
+
+function extractOpenSearchAnswer(payload) {
+  if (payload.code || payload.message) {
+    throw new Error(`OpenSearch 返回错误：${payload.code || "ERROR"} ${payload.message || ""}`);
+  }
+  if (typeof payload?.result?.text === "string") return payload.result.text;
+  if (Array.isArray(payload.errors) && payload.errors.length > 0) {
+    const message = payload.errors.map((error) => `${error.code || "ERROR"} ${error.message || ""}`).join("; ");
+    throw new Error(`OpenSearch 返回错误：${message}`);
+  }
+  const data = payload?.result?.data;
+  if (Array.isArray(data)) {
+    const answerItem = data.find((item) => typeof item.answer === "string") ?? data[0];
+    if (answerItem?.answer) return answerItem.answer;
+  }
+  if (typeof payload?.result?.answer === "string") return payload.result.answer;
+  if (typeof payload?.answer === "string") return payload.answer;
+  throw new Error("OpenSearch 未返回可解析的 answer。");
+}
+
+async function callOpenSearchForSection(state, reportNode) {
+  const { apiKey, openSearchHost, openSearchAppName, model } = state.settings.qwen;
   if (!apiKey) {
-    const error = new Error("Qwen API Key 尚未配置，请先在设置菜单填写并测试连接。");
+    const error = new Error("模型 API Key 尚未配置，请先在设置菜单填写并测试连接。");
     error.status = 400;
     throw error;
+  }
+  if (!openSearchHost || !openSearchAppName) {
+    const error = new Error("OpenSearch Host 或应用名称尚未配置。");
+    error.status = 400;
+    throw error;
+  }
+
+  const endpoint = `${openSearchHost.replace(/\/$/, "")}/v3/openapi/workspaces/${encodeURIComponent(openSearchAppName)}/text-generation/${encodeURIComponent(model)}`;
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({
+      messages: buildSectionPrompt(state, reportNode),
+      stream: false,
+      csi_level: "none",
+      parameters: {
+        temperature: 0.2,
+        max_tokens: 4096
+      }
+    })
+  });
+
+  const text = await response.text();
+  let payload;
+  try {
+    payload = JSON.parse(text);
+  } catch {
+    throw new Error(`OpenSearch 返回非 JSON 内容：${text.slice(0, 200)}`);
+  }
+  if (!response.ok) {
+    throw new Error(`OpenSearch 请求失败 ${response.status}：${text.slice(0, 300)}`);
+  }
+
+  const answer = extractOpenSearchAnswer(payload);
+  const parsed = JSON.parse(cleanJsonText(answer));
+  return normalizeDraft(parsed, reportNode);
+}
+
+async function callQwenForSection(state, reportNode) {
+  const { apiKey, baseUrl, model, provider } = state.settings.qwen;
+  if (!apiKey) {
+    const error = new Error("模型 API Key 尚未配置，请先在设置菜单填写并测试连接。");
+    error.status = 400;
+    throw error;
+  }
+
+  if (provider === "opensearch") {
+    return callOpenSearchForSection(state, reportNode);
   }
 
   const client = new OpenAI({ apiKey, baseURL: baseUrl });
@@ -506,7 +709,7 @@ async function callQwenForSection(state, reportNode) {
 
   const content = completion.choices?.[0]?.message?.content ?? "";
   if (!content) {
-    throw new Error("Qwen 未返回内容。");
+    throw new Error("模型未返回内容。");
   }
   const parsed = JSON.parse(cleanJsonText(content));
   return normalizeDraft(parsed, reportNode);
@@ -740,6 +943,10 @@ app.get("/api/state", async (_req, res) => {
 app.patch("/api/project", async (req, res) => {
   const state = await readState();
   state.project = { ...state.project, ...req.body };
+  if (req.body?.researchRequirement) {
+    state.framework = applyResearchDepths(state.framework, state.project.researchRequirement);
+    syncSectionsWithFramework(state);
+  }
   await writeState(state);
   res.json(publicState(state));
 });
@@ -771,7 +978,40 @@ app.post("/api/settings/qwen/test", async (_req, res, next) => {
   try {
     const state = await readState();
     if (!state.settings.qwen.apiKey) {
-      res.status(400).json({ message: "Qwen API Key 尚未配置。" });
+      res.status(400).json({ message: "模型 API Key 尚未配置。" });
+      return;
+    }
+    if (state.settings.qwen.provider === "opensearch") {
+      const { apiKey, openSearchHost, openSearchAppName, model } = state.settings.qwen;
+      const endpoint = `${openSearchHost.replace(/\/$/, "")}/v3/openapi/workspaces/${encodeURIComponent(openSearchAppName)}/text-generation/${encodeURIComponent(model)}`;
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          messages: [
+            { role: "system", content: "只返回 JSON。" },
+            { role: "user", content: "{\"ok\":true}" }
+          ],
+          stream: false,
+          csi_level: "none",
+          parameters: { max_tokens: 64, temperature: 0.2 }
+        })
+      });
+      const text = await response.text();
+      let payload;
+      try {
+        payload = JSON.parse(text);
+      } catch {
+        throw new Error(`OpenSearch 返回非 JSON 内容：${text.slice(0, 200)}`);
+      }
+      if (!response.ok || (Array.isArray(payload.errors) && payload.errors.length > 0)) {
+        const detail = Array.isArray(payload.errors) ? JSON.stringify(payload.errors) : text;
+        throw new Error(`OpenSearch 连接测试失败：${detail.slice(0, 300)}`);
+      }
+      res.json({ ok: true, sample: extractOpenSearchAnswer(payload).slice(0, 300) });
       return;
     }
     const client = new OpenAI({
