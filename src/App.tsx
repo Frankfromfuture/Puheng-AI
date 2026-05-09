@@ -226,7 +226,22 @@ function depthClass(depth: AnalysisDepth) {
 }
 
 function generatedAnalysisBody(section: AnalysisSection | undefined, node: ReportNode) {
-  const text = section?.analysisText?.trim() ?? "";
+  let text = section?.analysisText?.trim() ?? "";
+  if (text.startsWith("{") && text.includes('"analysisText"')) {
+    try {
+      const parsed = JSON.parse(text);
+      text = String(parsed.analysisText || text).trim();
+    } catch {
+      const match = text.match(/"analysisText"\s*:\s*"((?:\\.|[^"\\])*)"/s);
+      if (match?.[1]) {
+        try {
+          text = JSON.parse(`"${match[1]}"`).trim();
+        } catch {
+          text = match[1].replace(/\\n/g, "\n").replace(/\\"/g, "\"").trim();
+        }
+      }
+    }
+  }
   if (!text) return "";
   const meaningfulLines = text
     .split(/\r?\n/)

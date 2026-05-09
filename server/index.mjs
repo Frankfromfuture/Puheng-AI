@@ -661,21 +661,110 @@ function parseModelJson(text, context = "模型返回内容") {
   }
 }
 
-function draftFromUnstructuredAnswer(answer, reportNode, reason) {
-  const cleaned = String(answer || "").trim();
-  const body = cleaned
+function extractJsonStringField(text, field) {
+  const source = String(text || "");
+  const marker = `"${field}"`;
+  const markerIndex = source.indexOf(marker);
+  if (markerIndex === -1) return "";
+  const colonIndex = source.indexOf(":", markerIndex + marker.length);
+  if (colonIndex === -1) return "";
+  let quoteIndex = -1;
+  for (let i = colonIndex + 1; i < source.length; i++) {
+    if (/\s/.test(source[i])) continue;
+    if (source[i] === '"') quoteIndex = i;
+    break;
+  }
+  if (quoteIndex === -1) return "";
+
+  let value = "";
+  let escaped = false;
+  for (let i = quoteIndex + 1; i < source.length; i++) {
+    const char = source[i];
+    if (escaped) {
+      value += `\\${char}`;
+      escaped = false;
+    } else if (char === "\\") {
+      escaped = true;
+    } else if (char === '"') {
+      break;
+    } else {
+      value += char;
+    }
+  }
+
+  try {
+    return JSON.parse(`"${value}"`);
+  } catch {
+    return value
+      .replace(/\\n/g, "\n")
+      .replace(/\\r/g, "\r")
+      .replace(/\\t/g, "\t")
+      .replace(/\\"/g, "\"");
+  }
+}
+
+function extractJsonStringArrayField(text, field) {
+  const source = String(text || "");
+  const marker = `"${field}"`;
+  const markerIndex = source.indexOf(marker);
+  if (markerIndex === -1) return [];
+  const start = source.indexOf("[", markerIndex + marker.length);
+  if (start === -1) return [];
+  const tail = source.slice(start);
+  const values = [];
+  const pattern = /"((?:\\.|[^"\\])*)"/g;
+  let match;
+  while ((match = pattern.exec(tail))) {
+    const before = tail.slice(0, match.index);
+    if (before.includes("]")) break;
+    try {
+      values.push(JSON.parse(`"${match[1]}"`));
+    } catch {
+      values.push(match[1]);
+    }
+  }
+  return values.filter(Boolean);
+}
+
+function normalizeUnstructuredAnswer(answer, reportNode) {
+  const cleaned = String(answer || "")
+    .trim()
     .replace(/^```(?:json|markdown)?\s*/i, "")
     .replace(/\s*```$/i, "")
     .trim();
+  const looksLikeJson = cleaned.startsWith("{") || cleaned.includes('"analysisText"');
+  if (!looksLikeJson) return { body: cleaned, keyFindings: [], missingInfo: [] };
+
+  const body = extractJsonStringField(cleaned, "analysisText");
+  const keyFindings = extractJsonStringArrayField(cleaned, "keyFindings");
+  const missingInfo = extractJsonStringArrayField(cleaned, "missingInfo");
+  if (body || keyFindings.length > 0 || missingInfo.length > 0) {
+    return { body, keyFindings, missingInfo };
+  }
+
+  const compact = cleaned
+    .replace(/^\{\s*/, "")
+    .replace(/\s*\}\s*$/, "")
+    .replace(/^\s*"[^"]+"\s*:\s*/gm, "")
+    .replace(/[{},]\s*$/gm, "")
+    .trim();
+  return { body: compact, keyFindings: [], missingInfo: [] };
+}
+
+function draftFromUnstructuredAnswer(answer, reportNode, reason) {
+  const normalized = normalizeUnstructuredAnswer(answer, reportNode);
 
   return normalizeDraft({
     title: reportNode.title,
     confidenceScore: 50,
     confidenceReason: `模型已返回内容，但格式不是严格 JSON，系统已保留原文供人工核验。原因：${reason}`,
     sourceCoverage: "模型返回格式异常，来源引用需人工核验。",
-    keyFindings: [],
-    analysisText: body || "模型返回内容为空或不可解析，请重试生成。",
-    missingInfo: ["模型返回格式异常，需人工核验本节内容与来源。"],
+    keyFindings: normalized.keyFindings,
+    analysisText: normalized.body || "模型返回内容为空或不可解析，请重试生成。",
+    missingInfo: [
+      "模型返回格式异常，需人工核验本节内容与来源。",
+      ...normalized.missingInfo
+    ],
     citations: []
   }, reportNode);
 }
