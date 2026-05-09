@@ -35,7 +35,7 @@ app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 app.use("/exports", express.static(EXPORT_DIR));
 
-const depths = ["简版", "标准", "深入"];
+const depths = ["省略", "简版", "标准", "深入"];
 const knownDefaultNoteIds = new Set([
   "tsinghua-companies",
   "shanghai-soe",
@@ -57,7 +57,7 @@ const knownDefaultNoteIds = new Set([
 const researchRequirements = {
   brief: {
     label: "简要分析",
-    instruction: "所有章节只保留关键判断、直接依据和必要缺口，重点说明投资、招商落地、合作赋能中最相关的一项结论。"
+    instruction: "只生成一级目录，二级及以下目录省略；一级目录采用标准颗粒度，输出关键判断、直接依据和必要缺口。"
   },
   fundamental: {
     label: "基本面深度分析",
@@ -81,10 +81,10 @@ const researchRequirements = {
   }
 };
 
-function depthForRequirement(requirement, nodeId, parentId) {
+function depthForRequirement(requirement, nodeId, parentId, level = 1) {
   const mode = researchRequirements[requirement] ? requirement : "comprehensive";
   const group = parentId || nodeId;
-  if (mode === "brief") return "简版";
+  if (mode === "brief") return level === 1 ? "标准" : "省略";
   if (mode === "comprehensive") {
     if (["capital-cooperation", "enablement", "landing-plan"].includes(group)) return "深入";
     return "深入";
@@ -115,12 +115,16 @@ function depthForRequirement(requirement, nodeId, parentId) {
   return "标准";
 }
 
-function applyResearchDepths(nodes, requirement, parentId = null) {
+function applyResearchDepths(nodes, requirement, parentId = null, level = 1) {
   return nodes.map((item) => ({
     ...item,
-    depth: depthForRequirement(requirement, item.id, parentId),
-    children: applyResearchDepths(item.children ?? [], requirement, parentId || item.id)
+    depth: depthForRequirement(requirement, item.id, parentId, level),
+    children: applyResearchDepths(item.children ?? [], requirement, parentId || item.id, level + 1)
   }));
+}
+
+function canGenerateNode(node) {
+  return Boolean(node?.enabled && node.depth !== "省略");
 }
 
 function node(id, title, children = [], depth = "标准") {
@@ -276,13 +280,13 @@ function defaultState() {
     settings: {
       qwen: {
         apiKey: "",
-        provider: "dashscope",
+        provider: "opensearch",
         baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
         responsesBaseUrl: "https://dashscope.aliyuncs.com/api/v2/apps/protocols/compatible-mode/v1",
         openSearchHost: "https://default-hea5.platform-cn-shanghai.opensearch.aliyuncs.com",
         openSearchAppName: "default",
-        model: "qwen-plus",
-        region: "中国大陆（北京）"
+        model: "deepseek-v4-pro",
+        region: "华东2（上海）"
       },
       externalApis: [
         {
@@ -438,6 +442,7 @@ const DEFAULT_GLOBAL_STYLE = `报告生成时须严格遵循以下风格要求�
 8. 一级标题摘要：每个一级章节首段用2-3句极简结论。第1-3章只概括核心事实与现状；第4-5章概括落地与合作的核心意义。`;
 
 const DEFAULT_DEPTH_INSTRUCTIONS = {
+  "省略": "该章节不单独生成正文，不参与批量生成；其要点由上级章节概括承载。",
   "简版": "只输出核心判断、关键依据、直接影响和必要风险。每节尽量压缩为少量高密度段落，突出核心要点。",
   "标准": "在核心判断基础上补充关键事实、数据来源和简要推理。第1-3章回归纯客观评估；第4-5章才进行落地赋能等深度推理。并指出信息缺口。",
   "深入": "充分展开事实链、资本链、产业链。第1-3章严格客观分析风险与事项；第4-5章必须形成可执行判断：落地可行性、合作路径等。"
@@ -576,6 +581,16 @@ function migrateState(state) {
       }
     }
     state.meta.depthInstructionsV1 = true;
+    changed = true;
+  }
+  if (!state.promptEngineering?.depthInstructions?.["省略"]) {
+    state.promptEngineering ??= {};
+    state.promptEngineering.depthInstructions ??= {};
+    state.promptEngineering.depthInstructions["省略"] = DEFAULT_DEPTH_INSTRUCTIONS["省略"];
+    changed = true;
+  }
+  if (state.settings?.qwen?.model === "deepseek-v4-flash") {
+    state.settings.qwen.model = "deepseek-v4-pro";
     changed = true;
   }
   return changed;
@@ -1388,7 +1403,7 @@ function selectSourcesForPrompt(state, reportNode, options = {}) {
 function buildSectionPrompt(state, reportNode, options = {}) {
   const requirement = researchRequirements[state.project.researchRequirement] ?? researchRequirements.comprehensive;
   const flat = flatten(state.framework)
-    .filter((item) => item.enabled)
+    .filter((item) => canGenerateNode(item))
     .map((item) => `${"  ".repeat(item.level - 1)}- ${item.title}（深度：${item.depth}）`)
     .join("\n");
   const resources = state.settings.strongResources
@@ -1855,7 +1870,7 @@ function generatedAnalysisBody(section, node) {
 async function buildDocx(state) {
   const hasGeneratedContent = (node) => {
     const section = state.sections[node.id];
-    return Boolean(node.enabled && node.includeInWord && generatedAnalysisBody(section, node));
+    return Boolean(canGenerateNode(node) && node.includeInWord && generatedAnalysisBody(section, node));
   };
   const hasGeneratedBranch = (node) => hasGeneratedContent(node) || (node.children ?? []).some(hasGeneratedBranch);
 
@@ -2102,6 +2117,7 @@ async function generateDraftForSection(sectionId) {
     const state = await readState();
     const reportNode = findNode(state.framework, sectionId);
     if (!reportNode) return;
+    if (!canGenerateNode(reportNode)) return;
     const section = state.sections[sectionId] ?? createBlankSection(reportNode);
     if (section?.locked) return;
 
@@ -2133,6 +2149,10 @@ app.post("/api/sections/:id/draft", async (req, res, next) => {
     const reportNode = findNode(state.framework, req.params.id);
     if (!reportNode) {
       res.status(404).json({ message: "章节不存在。" });
+      return;
+    }
+    if (!canGenerateNode(reportNode)) {
+      res.status(400).json({ message: "该章节颗粒度为省略，不参与生成。" });
       return;
     }
     const section = state.sections[req.params.id] ?? createBlankSection(reportNode);
@@ -2258,7 +2278,7 @@ app.post("/api/report/generate", async (req, res) => {
     // Collect all enabled, non-locked nodes in order
     const nodesToGenerate = [];
     flatten(state.framework).forEach((item) => {
-      if (item.enabled && !item.locked && !state.sections[item.id]?.locked) {
+      if (canGenerateNode(item) && !item.locked && !state.sections[item.id]?.locked) {
         const node = findNode(state.framework, item.id);
         if (node) nodesToGenerate.push(node);
       }

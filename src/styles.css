@@ -783,7 +783,7 @@ nav button.active {
   padding-right: 2px;
   flex: 1;
   min-height: 0;
-  --framework-grid: 16px 16px 38px minmax(80px, 1fr) 52px 52px 14px 24px 24px;
+  --framework-grid: 16px 16px 38px minmax(80px, 1fr) 42px 42px 14px 24px 24px;
 }
 
 .tree-header {
@@ -862,6 +862,22 @@ nav button.active {
   font-size: 12px;
 }
 
+.tree-row .depth-badge,
+.tree-row .status {
+  width: 42px;
+  height: 22px;
+  min-height: 22px;
+  padding: 0 4px;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.tree-row select.depth-badge {
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+}
+
 .depth-badge,
 .depth-input {
   height: 24px;
@@ -882,6 +898,13 @@ nav button.active {
   background: var(--ink-0);
   border-color: var(--ink-900);
   color: var(--ink-900);
+}
+
+.depth-badge.omitted,
+.depth-input.omitted {
+  background: var(--ink-100);
+  border-color: var(--ink-200);
+  color: var(--ink-400);
 }
 
 .depth-badge.standard,
@@ -1453,7 +1476,7 @@ textarea {
 /* ===== Responsive ===== */
 @media (max-width: 1280px) {
   .tree {
-    --framework-grid: 16px 16px 36px minmax(60px, 1fr) 52px 52px 14px 24px 24px;
+    --framework-grid: 16px 16px 36px minmax(60px, 1fr) 42px 42px 14px 24px 24px;
   }
 }
 

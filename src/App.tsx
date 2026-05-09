@@ -115,10 +115,10 @@ function formatTokenCount(value = 0) {
   return value.toLocaleString("zh-CN");
 }
 
-const depthOptions: AnalysisDepth[] = ["简版", "标准", "深入"];
+const depthOptions: AnalysisDepth[] = ["省略", "简版", "标准", "深入"];
 
 const requirementOptions: Array<{ id: ResearchRequirement; label: string; shortLabel: string; focus: string; icon: typeof Zap }> = [
-  { id: "brief", label: "简要分析", shortLabel: "简要", focus: "所有框架均简单分析", icon: Zap },
+  { id: "brief", label: "简要分析", shortLabel: "简要", focus: "只生成一级目录，二级及以下省略", icon: Zap },
   { id: "fundamental", label: "基本面深度分析", shortLabel: "基本面", focus: "企业基本面深入，其余相应变化", icon: BarChart3 },
   { id: "investment", label: "投资合作分析", shortLabel: "投资", focus: "产业分析与资本分析重点", icon: Briefcase },
   { id: "landing", label: "招商落地分析", shortLabel: "招商", focus: "产业分析与区域交叉分析重点", icon: Building2 },
@@ -233,9 +233,14 @@ function createNode(title = "自定义章节"): ReportNode {
 }
 
 function depthClass(depth: AnalysisDepth) {
+  if (depth === "省略") return "omitted";
   if (depth === "深入") return "deep";
   if (depth === "简版") return "simple";
   return "standard";
+}
+
+function canGenerateNode(node: ReportNode) {
+  return node.enabled && node.depth !== "省略";
 }
 
 function generatedAnalysisBody(section: AnalysisSection | undefined, node: ReportNode) {
@@ -570,6 +575,11 @@ export default function App() {
   async function generateSection(id: string) {
     if (!state?.settings.qwen.apiKeyConfigured) {
       setMessage("请先在设置菜单配置模型 API Key 并测试连接。");
+      return;
+    }
+    const targetNode = flatNodes.find(({ node }) => node.id === id)?.node;
+    if (targetNode?.depth === "省略") {
+      setMessage("该章节颗粒度为省略，不参与生成。");
       return;
     }
     setState((prev) => {
@@ -1288,8 +1298,8 @@ function Dashboard(props: DashboardProps) {
 	                              setActiveSectionId(node.id);
 	                              generateSection(node.id);
 	                            }}
-	                            disabled={Boolean(busy) || generating || node.locked}
-	                            title="单独生成本章节分析报告"
+	                            disabled={Boolean(busy) || generating || node.locked || !canGenerateNode(node)}
+	                            title={node.depth === "省略" ? "该章节颗粒度为省略，不参与生成" : "单独生成本章节分析报告"}
 	                          >
 	                            <PlayCircle size={14} />
 	                          </button>
@@ -1821,9 +1831,9 @@ function PromptEngineeringView({
       </section>
       <section className="prompt-section">
         <div className="prompt-section-title">分析深度定义</div>
-        <p className="prompt-section-desc">三种深度的输出规则，AI 生成时按章节的深度设定严格执行。三栏并排编辑，修改后点击「确认保存」生效。</p>
+        <p className="prompt-section-desc">四种颗粒度的输出规则，AI 生成时按章节的颗粒度设定严格执行。修改后点击「确认保存」生效。</p>
         <div className="depth-instructions-grid">
-          {(["简版", "标准", "深入"] as const).map((depth) => (
+          {depthOptions.map((depth) => (
             <PromptTextarea
               key={depth}
               label={depth}
