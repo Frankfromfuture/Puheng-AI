@@ -1437,7 +1437,7 @@ function SettingsView({
               value={qwen.provider}
               onChange={(event) => saveSettings({ qwen: { provider: event.target.value } })}
             >
-              <option value="opensearch">OpenSearch / AI 搜索开放平台</option>
+              <option value="opensearch">Qwen/OpenSerach/Deepseek v4 pro</option>
               <option value="dashscope">DashScope / OpenAI-compatible</option>
             </select>
           </label>
@@ -1466,14 +1466,6 @@ function SettingsView({
                   value={qwen.openSearchHost}
                   onChange={(event) => saveSettings({ qwen: { openSearchHost: event.target.value } })}
                   placeholder="https://default-hea5.platform-cn-shanghai.opensearch.aliyuncs.com"
-                />
-              </label>
-              <label>
-                工作空间 / workspace
-                <input
-                  value={qwen.openSearchAppName}
-                  onChange={(event) => saveSettings({ qwen: { openSearchAppName: event.target.value } })}
-                  placeholder="例如 default"
                 />
               </label>
             </>
