@@ -871,7 +871,9 @@ export default function App() {
             >
               <span>模型状态</span>
               <strong>{modelHealthCopy[modelHealth].label}</strong>
-              <small>{state.settings.qwen.provider === "opensearch" ? "OpenSearch" : "DashScope"} · {state.settings.qwen.model}</small>
+              <small className="model-line" title={`当前模型：${state.settings.qwen.model}`}>
+                当前模型 · {state.settings.qwen.provider === "opensearch" ? "OpenSearch" : "DashScope"} · {state.settings.qwen.model}
+              </small>
               <small className="token-usage-line">
                 Token 输入 {formatTokenCount(modelTokenUsage?.input ?? 0)} / 输出 {formatTokenCount(modelTokenUsage?.output ?? 0)}
               </small>
@@ -1108,7 +1110,7 @@ function Dashboard(props: DashboardProps) {
   const mobilePanels = [
     { id: "framework" as const, label: "框架", icon: Layers3 },
     { id: "resources" as const, label: "合作点", icon: Handshake },
-    { id: "preview" as const, label: "预览", icon: FileText }
+    { id: "preview" as const, label: "报告正文", icon: FileText }
   ];
 
   return (
@@ -1265,7 +1267,7 @@ function Dashboard(props: DashboardProps) {
 
         <div className={`panel report-preview-panel mobile-panel ${mobilePanel === "preview" ? "mobile-active" : ""}`}>
           <div className="panel-title">
-            <span>分析报告预览</span>
+            <span>报告正文生成</span>
             <button className="icon-button" onClick={copyGeneratedReport} title="复制已生成分析报告">
               <Clipboard size={16} />
             </button>
@@ -1407,10 +1409,8 @@ function ResourcePanel({
             <ResourceItem
               checked={item.enabled}
               name={item.name}
-              note={item.notes}
               onEnabled={(enabled) => updateItem<StrongResource>("strongResources", item.id, { enabled })}
               onName={(name) => updateItem<StrongResource>("strongResources", item.id, { name })}
-              onNote={(notes) => updateItem<StrongResource>("strongResources", item.id, { notes })}
               onRemove={() => removeItem("strongResources", item.id)}
             />
           )}
@@ -1424,10 +1424,8 @@ function ResourcePanel({
             <ResourceItem
               checked={item.enabled}
               name={item.name}
-              note={item.notes ?? ""}
               onEnabled={(enabled) => updateItem<LandingRegion>("landingRegions", item.id, { enabled })}
               onName={(name) => updateItem<LandingRegion>("landingRegions", item.id, { name })}
-              onNote={(notes) => updateItem<LandingRegion>("landingRegions", item.id, { notes })}
               onRemove={() => removeItem("landingRegions", item.id)}
             />
           )}
@@ -1441,10 +1439,8 @@ function ResourcePanel({
             <ResourceItem
               checked={item.enabled}
               name={item.name}
-              note={item.notes}
               onEnabled={(enabled) => updateItem<LandingMethod>("landingMethods", item.id, { enabled })}
               onName={(name) => updateItem<LandingMethod>("landingMethods", item.id, { name })}
-              onNote={(notes) => updateItem<LandingMethod>("landingMethods", item.id, { notes })}
               onRemove={() => removeItem("landingMethods", item.id)}
             />
           )}
@@ -1483,25 +1479,20 @@ function ResourceGroup<T extends { id: string }>({
 function ResourceItem({
   checked,
   name,
-  note,
   onEnabled,
   onName,
-  onNote,
   onRemove
 }: {
   checked: boolean;
   name: string;
-  note?: string;
   onEnabled: (enabled: boolean) => void;
   onName: (name: string) => void;
-  onNote: (note: string) => void;
   onRemove: () => void;
 }) {
   return (
     <div className={`resource-item ${checked ? "enabled" : ""}`}>
       <input type="checkbox" checked={checked} onChange={(event) => onEnabled(event.target.checked)} />
       <DraftInput className="resource-name" value={name} onCommit={onName} />
-      <DraftInput className="resource-note" value={note ?? ""} onCommit={onNote} placeholder="注解" />
       <button className="icon-button danger" onClick={onRemove} title="删除">
         <Trash2 size={14} />
       </button>

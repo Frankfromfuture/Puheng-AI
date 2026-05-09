@@ -285,7 +285,7 @@ function defaultState() {
         responsesBaseUrl: "https://dashscope.aliyuncs.com/api/v2/apps/protocols/compatible-mode/v1",
         openSearchHost: "https://default-hea5.platform-cn-shanghai.opensearch.aliyuncs.com",
         openSearchAppName: "default",
-        model: "deepseek-v4-pro",
+        model: "deepseek-v4-flash",
         region: "华东2（上海）"
       },
       externalApis: [
@@ -589,8 +589,12 @@ function migrateState(state) {
     state.promptEngineering.depthInstructions["省略"] = DEFAULT_DEPTH_INSTRUCTIONS["省略"];
     changed = true;
   }
-  if (state.settings?.qwen?.model === "deepseek-v4-flash") {
-    state.settings.qwen.model = "deepseek-v4-pro";
+  if (!state.meta.defaultModelFlashV1) {
+    if (["deepseek-v4-pro", "qwen-plus"].includes(state.settings?.qwen?.model)) {
+      state.settings.qwen.model = "deepseek-v4-flash";
+      changed = true;
+    }
+    state.meta.defaultModelFlashV1 = true;
     changed = true;
   }
   return changed;
