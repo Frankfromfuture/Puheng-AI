@@ -652,6 +652,34 @@ function cleanJsonText(text) {
   return fixed;
 }
 
+function parseModelJson(text, context = "模型返回内容") {
+  try {
+    return JSON.parse(cleanJsonText(text));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`${context}不是严格 JSON：${message}`);
+  }
+}
+
+function draftFromUnstructuredAnswer(answer, reportNode, reason) {
+  const cleaned = String(answer || "").trim();
+  const body = cleaned
+    .replace(/^```(?:json|markdown)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+
+  return normalizeDraft({
+    title: reportNode.title,
+    confidenceScore: 50,
+    confidenceReason: `模型已返回内容，但格式不是严格 JSON，系统已保留原文供人工核验。原因：${reason}`,
+    sourceCoverage: "模型返回格式异常，来源引用需人工核验。",
+    keyFindings: [],
+    analysisText: body || "模型返回内容为空或不可解析，请重试生成。",
+    missingInfo: ["模型返回格式异常，需人工核验本节内容与来源。"],
+    citations: []
+  }, reportNode);
+}
+
 function stripHtml(value = "") {
   return value
     .replace(/<!--red_beg-->|<!--red_end-->/g, "")
@@ -856,7 +884,7 @@ async function searchQueriesForSection(state, reportNode) {
           text = completion.choices?.[0]?.message?.content ?? "";
         }
         
-        const parsed = JSON.parse(cleanJsonText(text));
+        const parsed = parseModelJson(text, "动态搜索词生成结果");
         if (Array.isArray(parsed?.queries) && parsed.queries.length > 0) {
           dynamicQueries.push(...parsed.queries.map(String));
         }
@@ -1394,7 +1422,7 @@ async function callOpenSearchForSection(state, reportNode) {
 
   const endpoint = `${openSearchHost.replace(/\/$/, "")}/v3/openapi/workspaces/${encodeURIComponent(openSearchAppName)}/text-generation/${encodeURIComponent(model)}`;
   const requestOpenSearch = async (messages, maxTokens = 4096) =>
-    fetch(endpoint, {
+    fetchWithTimeout(endpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -1409,7 +1437,7 @@ async function callOpenSearchForSection(state, reportNode) {
           max_tokens: maxTokens
         }
       })
-    });
+    }, 90000);
 
   let response = await requestOpenSearch(buildSectionPrompt(state, reportNode), 4096);
   let text = await response.text();
@@ -1434,7 +1462,14 @@ async function callOpenSearchForSection(state, reportNode) {
   }
 
   const answer = extractOpenSearchAnswer(payload);
-  const parsed = JSON.parse(cleanJsonText(answer));
+  let parsed;
+  try {
+    parsed = parseModelJson(answer, "OpenSearch 章节生成结果");
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    console.error(`${reason}，已按原文保存章节。`);
+    return draftFromUnstructuredAnswer(answer, reportNode, reason);
+  }
   return normalizeDraft(parsed, reportNode);
 }
 
@@ -1462,7 +1497,14 @@ async function callQwenForSection(state, reportNode) {
   if (!content) {
     throw new Error("模型未返回内容。");
   }
-  const parsed = JSON.parse(cleanJsonText(content));
+  let parsed;
+  try {
+    parsed = parseModelJson(content, "模型章节生成结果");
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    console.error(`${reason}，已按原文保存章节。`);
+    return draftFromUnstructuredAnswer(content, reportNode, reason);
+  }
   return normalizeDraft(parsed, reportNode);
 }
 
