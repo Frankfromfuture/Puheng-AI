@@ -212,7 +212,10 @@ nav button {
 }
 
 .sidebar.collapsed nav button {
+  width: 36px;
+  height: 36px;
   justify-content: center;
+  justify-self: center;
   padding: 0;
 }
 
