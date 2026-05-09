@@ -48,6 +48,7 @@ const knownDefaultNoteIds = new Set([
   "land",
   "lease",
   "coop-fund",
+  "order-enablement",
   "industry-fund",
   "medical",
   "soe"
@@ -199,8 +200,7 @@ function defaultFramework() {
       ],
       "深入"
     ),
-    node("risks", "企业风险分析", [], "深入"),
-    node("citation-appendix", "引用来源附录", [], "简版")
+    node("risks", "企业风险分析", [], "深入")
   ];
 }
 
@@ -383,9 +383,7 @@ function defaultState() {
         { id: "land", name: "合作拿地", enabled: true, notes: "" },
         { id: "lease", name: "租赁落地", enabled: true, notes: "" },
         { id: "coop-fund", name: "合作基金", enabled: true, notes: "" },
-        { id: "industry-fund", name: "产业基金投资", enabled: true, notes: "" },
-        { id: "medical", name: "医疗系统合作", enabled: true, notes: "" },
-        { id: "soe", name: "国央企合作", enabled: true, notes: "" }
+        { id: "order-enablement", name: "订单赋能", enabled: true, notes: "" }
       ]
     },
     framework,
@@ -468,25 +466,22 @@ const DEFAULT_NODE_NOTES = {
   "land-cooperation": "分析企业是否存在拿地或重资产空间需求，判断用地类型、面积、建设内容、投资强度、产出贡献和谈判条件。不可凭空估算，估算必须说明依据。",
   "leasing-landing": "分析企业适合租赁落地的场景，如总部办公、研发中心、展示中心、销售中心、仓储或小试中试空间。匹配园区载体、面积区间、租赁周期和落地优先级。",
   "landing-fund": "结合企业融资阶段、产业方向、区域基金政策和我方资源，评估专项基金、产业基金直投或基金招商的可行性。说明基金角色、可能规模、LP结构、投资逻辑和风险。",
-  "risks": "从经营、财务、法律合规、治理结构、技术替代、客户集中、融资压力、落地承诺和合作执行角度识别风险。每项风险都要说明对投资、招商落地、合作赋能的影响和核实办法。",
-  "citation-appendix": "列出全部引用来源，包含来源名称、类型、时间、链接或文件名、支撑的关键判断。来源要服务于投资、落地和合作判断，避免只罗列无关材料。"
+  "risks": "从经营、财务、法律合规、治理结构、技术替代、客户集中、融资压力、落地承诺和合作执行角度识别风险。每项风险都要说明对投资、招商落地、合作赋能的影响和核实办法。"
 };
 
 const DEFAULT_RESOURCE_NOTES = {
-  "tsinghua-companies": "分析目标企业与清华系企业、校友网络、科研成果和产业资源的协同点，重点识别技术验证、客户引荐、联合研发、资本背书和生态合作入口。",
-  "shanghai-soe": "评估目标企业与上海国央企在客户、供应链、场景开放、战略投资、联合项目和落地采购方面的合作机会，明确最可行的切入对象和路径。",
-  "shanghai-medical": "分析目标企业产品/技术在上海医疗系统的应用场景，识别科室、医院、渠道、试点路径和合规门槛，并判断是否可形成示范场景或招商落地抓手。",
+  "tsinghua-companies": "分析目标企业与清华系企业、校友网络、科研成果和产业资源的协同点，重点聚焦于新紫光系企业，识别技术合作、采购关系、投资合作和生态合作入口。",
+  "shanghai-soe": "评估目标企业与上海国央企，尤其是申能、上汽、久事、漕河泾、临港等、在客户采购、供应链、场景开放、战略投资、联合项目和落地采购方面的合作机会，明确最可行的切入对象和路径。",
+  "shanghai-medical": "分析目标企业产品/技术在上海知名三甲医院与申康中心的应用场景，识别科室、医院、渠道、试点路径和合规门槛，并判断是否可形成示范场景、采购订单与招商落地抓手。",
   "qingpu": "评估企业与青浦产业方向、空间载体、基金资源、交通区位和重点企业生态的匹配度，说明适合落地的业态、政策抓手和合作入口。",
   "longhua": "评估企业与深圳龙华制造业升级、供应链生态、空间载体和产业政策的匹配度，说明落地价值、上下游协同和合作切入点。",
   "qingpu-region": "结合青浦区及徐泾镇产业规划、园区载体、基金政策和重点企业生态，判断企业落地的产业契合度、空间适配度、税收/就业贡献和招商推进路径。",
   "longhua-region": "结合龙华区及民治街道、深国际华南物流园片区的产业规划、空间资源和制造业生态，判断企业落地的产业契合度、供应链协同和招商推进路径。",
-  "attraction": "分析企业招商引资适配性，明确可能落地业态、业务规模、税收贡献、就业带动、政策诉求和政府谈判抓手，给出优先推进方式。",
-  "land": "分析企业是否具备合作拿地需求，判断用地用途、面积区间、投资强度、建设内容、产出贡献和前置条件，避免无依据承诺。",
-  "lease": "分析租赁落地优先场景，匹配写字楼、园区、研发楼、仓储或中试空间，说明面积、周期、成本敏感度和快速落地路径。",
-  "coop-fund": "评估与企业联合设立专项产业基金的可行性，说明基金主题、规模区间、LP结构、管理机构、投资范围、招商带动和风险边界。",
-  "industry-fund": "评估区域产业基金直投企业的条件，关注轮次、估值、退出路径、产业贡献、落地承诺和投后赋能空间。",
-  "medical": "分析企业产品/技术进入医疗系统的场景适配、合规门槛、试点科室、采购路径和示范价值，明确合作切入机构。",
-  "soe": "评估目标企业与国央企在供应链引荐、联合项目、场景开放、战略投资和落地采购方面的合作可能，识别最短路径和关键决策方。"
+  "attraction": "分析企业在所选择重点落地区域内的招商引资落地的适配性，明确可能落地业态、业务规模、税收贡献、就业带动、政策诉求和政府谈判抓手，给出优先推进方式。",
+  "land": "分析企业是否具备合作拿地需求，如产能扩产、第二总部、建设创新研发中心、募投固定资产等，判断用地用途、面积区间、投资强度、建设内容、产出贡献和前置条件，避免无依据承诺。",
+  "lease": "分析所选择重点落地区域内的国央企重点园区与政策，分析企业最迫切需求，匹配租赁落地优先场景（生产基地、研发空间、办公空间、创新空间等），说明面积、周期、成本敏感度和快速落地路径。",
+  "coop-fund": "评估与所选择的重点落地区域政府资金，与企业联合设立专项产业基金的可行性，说明基金主题、规模区间、LP结构、管理机构、投资范围、招商带动和风险边界。",
+  "order-enablement": "围绕我方以上的强资源赋能提示词，分析目标企业与强赋能资源间的订单合作机会"
 };
 
 function migrateState(state) {
@@ -498,6 +493,29 @@ function migrateState(state) {
     changed = true;
   }
   state.meta ??= {};
+  if (!state.meta.landingMethodsOrderEnablementV1) {
+    state.settings ??= {};
+    state.settings.landingMethods ??= [];
+    state.settings.landingMethods = state.settings.landingMethods.filter(
+      (item) => !["industry-fund", "medical", "soe"].includes(item.id)
+    );
+    if (!state.settings.landingMethods.some((item) => item.id === "order-enablement")) {
+      state.settings.landingMethods.push({
+        id: "order-enablement",
+        name: "订单赋能",
+        enabled: true,
+        notes: DEFAULT_RESOURCE_NOTES["order-enablement"]
+      });
+    }
+    state.meta.landingMethodsOrderEnablementV1 = true;
+    changed = true;
+  }
+  if (!state.meta.removeCitationAppendixV1) {
+    state.framework = (state.framework ?? []).filter((node) => node.id !== "citation-appendix");
+    if (state.sections) delete state.sections["citation-appendix"];
+    state.meta.removeCitationAppendixV1 = true;
+    changed = true;
+  }
   if (!state.meta.blankDefaultAnnotationsV1) {
     for (const item of state.settings?.strongResources ?? []) {
       if (knownDefaultNoteIds.has(item.id)) item.notes = "";
@@ -998,6 +1016,70 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function normalizeTokenUsage(value = {}) {
+  const input = Number(
+    value.input ??
+    value.input_tokens ??
+    value.prompt_tokens ??
+    value.promptTokens ??
+    value.total_input_tokens ??
+    0
+  );
+  const output = Number(
+    value.output ??
+    value.output_tokens ??
+    value.completion_tokens ??
+    value.completionTokens ??
+    value.total_output_tokens ??
+    0
+  );
+  const total = Number(value.total ?? value.total_tokens ?? 0);
+  return {
+    input: Number.isFinite(input) ? input : 0,
+    output: Number.isFinite(output) ? output : 0,
+    total: Number.isFinite(total) ? total : 0
+  };
+}
+
+function findTokenUsage(payload, depth = 0) {
+  if (!payload || typeof payload !== "object" || depth > 4) return null;
+  const direct = normalizeTokenUsage(payload);
+  if (direct.input > 0 || direct.output > 0 || direct.total > 0) return direct;
+  for (const key of ["usage", "token_usage", "tokenUsage", "tokens", "result", "data", "output"]) {
+    const nested = payload[key];
+    if (!nested) continue;
+    if (Array.isArray(nested)) {
+      for (const item of nested) {
+        const found = findTokenUsage(item, depth + 1);
+        if (found) return found;
+      }
+    } else {
+      const found = findTokenUsage(nested, depth + 1);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+function recordTokenUsage(state, usage) {
+  const normalized = normalizeTokenUsage(usage ?? {});
+  if (normalized.input <= 0 && normalized.output <= 0 && normalized.total <= 0) return;
+  state.meta ??= {};
+  const current = state.meta.modelTokenUsage && typeof state.meta.modelTokenUsage === "object"
+    ? state.meta.modelTokenUsage
+    : {};
+  const input = Number(current.input ?? 0) + normalized.input;
+  const output = Number(current.output ?? 0) + normalized.output;
+  const total = Number(current.total ?? 0) + (normalized.total || normalized.input + normalized.output);
+  state.meta.modelTokenUsage = {
+    input,
+    output,
+    total,
+    requests: Number(current.requests ?? 0) + 1,
+    updatedAt: new Date().toISOString()
+  };
 }
 
 function parseSogouResults(html, query, limit) {
@@ -1546,6 +1628,7 @@ async function callOpenSearchForSection(state, reportNode) {
   } catch {
     throw new Error(`OpenSearch 返回非 JSON 内容：${text.slice(0, 200)}`);
   }
+  recordTokenUsage(state, findTokenUsage(payload));
   if (!response.ok) {
     throw new Error(`OpenSearch 请求失败 ${response.status}：${text.slice(0, 300)}`);
   }
@@ -1581,6 +1664,7 @@ async function callQwenForSection(state, reportNode) {
     messages: buildSectionPrompt(state, reportNode),
     response_format: { type: "json_object" }
   });
+  recordTokenUsage(state, completion.usage);
 
   const content = completion.choices?.[0]?.message?.content ?? "";
   if (!content) {
@@ -1723,6 +1807,22 @@ function contentParagraphs(text) {
       index += 1;
       continue;
     }
+    const headingMatch = lines[index].match(/^###\s+(.+)$/);
+    if (headingMatch) {
+      flushParagraph();
+      children.push(
+        new Paragraph({
+          spacing: { before: 260, after: 100, line: 320 },
+          children: markdownRuns(headingMatch[1].trim(), {
+            size: 26,
+            bold: true,
+            color: "18181B"
+          })
+        })
+      );
+      index += 1;
+      continue;
+    }
     paragraphLines.push(lines[index]);
     index += 1;
   }
@@ -1731,7 +1831,14 @@ function contentParagraphs(text) {
 }
 
 function generatedAnalysisBody(section, node) {
-  const text = section?.analysisText?.trim() ?? "";
+  let text = section?.analysisText?.trim() ?? "";
+  if (text.startsWith("{") && text.includes('"analysisText"')) {
+    try {
+      text = String(JSON.parse(text).analysisText || text).trim();
+    } catch {
+      text = extractJsonStringField(text, "analysisText") || text;
+    }
+  }
   if (!text) return "";
   return text
     .split(/\r?\n/)
@@ -1748,7 +1855,7 @@ function generatedAnalysisBody(section, node) {
 async function buildDocx(state) {
   const hasGeneratedContent = (node) => {
     const section = state.sections[node.id];
-    return Boolean(node.enabled && node.includeInWord && node.id !== "citation-appendix" && generatedAnalysisBody(section, node));
+    return Boolean(node.enabled && node.includeInWord && generatedAnalysisBody(section, node));
   };
   const hasGeneratedBranch = (node) => hasGeneratedContent(node) || (node.children ?? []).some(hasGeneratedBranch);
 
@@ -1990,6 +2097,36 @@ app.patch("/api/sections/:id", async (req, res) => {
   res.json(publicState(state));
 });
 
+async function generateDraftForSection(sectionId) {
+  try {
+    const state = await readState();
+    const reportNode = findNode(state.framework, sectionId);
+    if (!reportNode) return;
+    const section = state.sections[sectionId] ?? createBlankSection(reportNode);
+    if (section?.locked) return;
+
+    const existingUrls = new Set(state.sources.map((s) => s.url).filter(Boolean));
+    const searchResults = await searchPublicSources(state, reportNode);
+    const newSources = searchResults.filter((s) => s.url && !existingUrls.has(s.url));
+    if (newSources.length > 0) {
+      state.sources.push(...newSources);
+      await writeState(state);
+    }
+
+    const draft = await callQwenForSection(state, reportNode);
+    state.sections[sectionId] = draft;
+    reportNode.status = draft.status;
+    await writeState(state);
+  } catch (error) {
+    const state = await readState();
+    const reportNode = findNode(state.framework, sectionId);
+    if (reportNode) reportNode.status = "not_started";
+    if (state.sections[sectionId]) state.sections[sectionId].status = "not_started";
+    await writeState(state);
+    console.error(`章节生成失败 ${sectionId}:`, error);
+  }
+}
+
 app.post("/api/sections/:id/draft", async (req, res, next) => {
   try {
     const state = await readState();
@@ -2006,18 +2143,11 @@ app.post("/api/sections/:id/draft", async (req, res, next) => {
     reportNode.status = "generating";
     state.sections[req.params.id] = { ...section, status: "generating" };
     await writeState(state);
-    const existingUrls = new Set(state.sources.map((s) => s.url).filter(Boolean));
-    const searchResults = await searchPublicSources(state, reportNode);
-    const newSources = searchResults.filter((s) => s.url && !existingUrls.has(s.url));
-    if (newSources.length > 0) {
-      state.sources.push(...newSources);
-      await writeState(state);
-    }
-
-    const draft = await callQwenForSection(state, reportNode);
-    state.sections[req.params.id] = draft;
-    reportNode.status = draft.status;
-    await writeState(state);
+    setTimeout(() => {
+      generateDraftForSection(req.params.id).catch((error) => {
+        console.error(`章节生成后台任务失败 ${req.params.id}:`, error);
+      });
+    }, 0);
     res.json(publicState(state));
   } catch (error) {
     const state = await readState();
@@ -2204,6 +2334,8 @@ app.post("/api/report/clear", async (_req, res, next) => {
       node.locked = false;
       state.sections[node.id] = createBlankSection(node);
     });
+    state.meta ??= {};
+    state.meta.modelTokenUsage = { input: 0, output: 0, total: 0, requests: 0, updatedAt: new Date().toISOString() };
     await writeState(state);
     res.json(publicState(state));
   } catch (error) {

@@ -41,6 +41,7 @@ import type {
   ExternalApiSetting,
   LandingMethod,
   LandingRegion,
+  ModelTokenUsage,
   PromptEngineering,
   ReportNode,
   ResearchRequirement,
@@ -105,6 +106,15 @@ async function request<T>(url: string, init: RequestInit = {}): Promise<T> {
   return payload as T;
 }
 
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function formatTokenCount(value = 0) {
+  if (value >= 10000) return `${(value / 10000).toFixed(1)}万`;
+  return value.toLocaleString("zh-CN");
+}
+
 const depthOptions: AnalysisDepth[] = ["简版", "标准", "深入"];
 
 const requirementOptions: Array<{ id: ResearchRequirement; label: string; shortLabel: string; focus: string; icon: typeof Zap }> = [
@@ -131,6 +141,9 @@ const statusClass: Record<SectionStatus, string> = {
   confirmed: "confirmed",
   insufficient: "warning"
 };
+
+const granularityTitle = "颗粒度：指定本章节生成内容的展开程度，支持简版、标准、深入。";
+const confidenceTitle = "置信度：提示本章节生成结果的可信程度或当前生成状态。";
 
 function confidenceLabel(score: number | undefined, status: SectionStatus): { text: string; cls: string } {
   if (status === "generating") return { text: "生成中", cls: "working" };
@@ -264,6 +277,48 @@ function renderInlineMarkdown(text: string) {
   });
 }
 
+function escapeHtml(text: string) {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function markdownToPrintHtml(text: string) {
+  const lines = text.split(/\r?\n/);
+  const html: string[] = [];
+  for (let index = 0; index < lines.length;) {
+    const table = parseMarkdownTable(lines, index);
+    if (table) {
+      html.push("<table><thead><tr>");
+      html.push(table.headers.map((cell) => `<th>${escapeHtml(cell)}</th>`).join(""));
+      html.push("</tr></thead><tbody>");
+      for (const row of table.rows) {
+        html.push("<tr>");
+        html.push(table.headers.map((_, cellIndex) => `<td>${escapeHtml(row[cellIndex] ?? "")}</td>`).join(""));
+        html.push("</tr>");
+      }
+      html.push("</tbody></table>");
+      index = table.nextIndex;
+      continue;
+    }
+    const line = lines[index].trim();
+    if (!line) {
+      index += 1;
+      continue;
+    }
+    const heading = line.match(/^###\s+(.+)$/);
+    if (heading) {
+      html.push(`<h3>${escapeHtml(heading[1])}</h3>`);
+    } else {
+      html.push(`<p>${escapeHtml(line).replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")}</p>`);
+    }
+    index += 1;
+  }
+  return html.join("");
+}
+
 function isMarkdownTableSeparator(line: string) {
   const cells = line.trim().split("|").map((cell) => cell.trim()).filter(Boolean);
   return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
@@ -351,6 +406,18 @@ function MarkdownPreview({ text }: { text: string }) {
       continue;
     }
 
+    const headingMatch = line.match(/^###\s+(.+)$/);
+    if (headingMatch) {
+      flushParagraph();
+      elements.push(
+        <h3 className="markdown-h3" key={`h3-${elements.length}`}>
+          {renderInlineMarkdown(headingMatch[1].trim())}
+        </h3>
+      );
+      index += 1;
+      continue;
+    }
+
     paragraphLines.push(line);
     index += 1;
   }
@@ -408,6 +475,7 @@ export default function App() {
   const flatNodes = useMemo(() => (state ? flatten(state.framework) : []), [state]);
   const activeSection = state?.sections[activeSectionId];
   const activeNode = flatNodes.find((item) => item.node.id === activeSectionId)?.node;
+  const modelTokenUsage = state?.meta?.modelTokenUsage as ModelTokenUsage | undefined;
   const generatedCount = state
     ? flatNodes.filter(({ node }) => Boolean(generatedAnalysisBody(state.sections[node.id], node))).length
     : 0;
@@ -436,6 +504,16 @@ export default function App() {
     if (!next.sections[activeSectionId]) {
       setActiveSectionId(Object.keys(next.sections)[0] ?? "");
     }
+  }
+
+  async function pollSectionUntilSettled(id: string) {
+    for (let attempt = 0; attempt < 150; attempt++) {
+      await wait(2000);
+      const next = await api.getState();
+      applyState(next);
+      if (next.sections[id]?.status !== "generating") return next;
+    }
+    throw new Error("生成仍在后台处理中，请稍后刷新查看结果。");
   }
 
   async function saveFramework(next: ReportNode[]) {
@@ -505,7 +583,11 @@ export default function App() {
         }
       };
     });
-    const saved = await withBusy("生成章节", () => api.draftSection(id));
+    const saved = await withBusy("生成章节", async () => {
+      const started = await api.draftSection(id);
+      applyState(started);
+      return pollSectionUntilSettled(id);
+    });
     if (saved) applyState(saved);
   }
 
@@ -681,6 +763,55 @@ export default function App() {
     }
   }
 
+  function exportPdf() {
+    if (!state) return;
+    const generated = flatNodes
+      .map(({ node, numbering }) => {
+        const section = state.sections[node.id];
+        const body = generatedAnalysisBody(section, node);
+        return body ? `<section><h2>${escapeHtml(`${numbering} ${node.title}`)}</h2>${markdownToPrintHtml(body)}</section>` : "";
+      })
+      .filter(Boolean)
+      .join("");
+
+    if (!generated) {
+      setMessage("暂无可生成 PDF 的分析内容。");
+      return;
+    }
+
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      setMessage("浏览器拦截了 PDF 打印窗口，请允许弹窗后重试。");
+      return;
+    }
+    printWindow.document.write(`<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtml(state.project.companyName || "企业分析报告")} - PDF</title>
+  <style>
+    body { margin: 28px; font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", Arial, sans-serif; color: #18181b; line-height: 1.7; }
+    h1 { font-size: 24px; margin: 0 0 18px; }
+    h2 { font-size: 18px; margin: 22px 0 10px; page-break-after: avoid; }
+    h3 { font-size: 16px; font-weight: 900; margin: 20px 0 8px; page-break-after: avoid; }
+    p { margin: 0 0 12px; white-space: pre-wrap; }
+    strong { font-weight: 900; }
+    table { width: 100%; border-collapse: collapse; margin: 10px 0 16px; font-size: 12px; }
+    th, td { border: 1px solid #d4d4d8; padding: 6px 8px; vertical-align: top; text-align: left; }
+    th { background: #f4f4f5; }
+    @page { margin: 18mm; }
+  </style>
+</head>
+<body>
+  <h1>${escapeHtml(state.project.companyName || "企业分析报告")}</h1>
+  ${generated}
+</body>
+</html>`);
+    printWindow.document.close();
+    printWindow.focus();
+    setTimeout(() => printWindow.print(), 300);
+  }
+
   if (!state) {
     return (
       <main className="loading">
@@ -703,22 +834,22 @@ export default function App() {
         </div>
         <nav>
           <button className={activeView === "dashboard" ? "active" : ""} onClick={() => setActiveView("dashboard")} title="工作台">
-            <Layers3 size={18} /> {!sidebarCollapsed && "工作台"}
+            <Layers3 size={18} /> {!sidebarCollapsed && <span className="nav-label">工作台</span>}
           </button>
           <button className={activeView === "companyDatabase" ? "active" : ""} onClick={() => setActiveView("companyDatabase")} title="企业数据库">
-            <Database size={18} /> {!sidebarCollapsed && "企业数据库"}
+            <Database size={18} /> {!sidebarCollapsed && <span className="nav-label">数据库</span>}
           </button>
           <button className={activeView === "companyGraph" ? "active" : ""} onClick={() => setActiveView("companyGraph")} title="企业立体关联信息">
-            <Network size={18} /> {!sidebarCollapsed && "企业立体关联信息"}
+            <Network size={18} /> {!sidebarCollapsed && <span className="nav-label">关联</span>}
           </button>
           <button className={activeView === "prompts" ? "active" : ""} onClick={() => setActiveView("prompts")} title="提示词工程">
-            <SlidersHorizontal size={18} /> {!sidebarCollapsed && "提示词工程"}
+            <SlidersHorizontal size={18} /> {!sidebarCollapsed && <span className="nav-label">提示词</span>}
           </button>
           <button className={activeView === "files" ? "active" : ""} onClick={() => setActiveView("files")} title="资料库">
-            <Upload size={18} /> {!sidebarCollapsed && "资料库"}
+            <Upload size={18} /> {!sidebarCollapsed && <span className="nav-label">资料</span>}
           </button>
           <button className={activeView === "settings" ? "active" : ""} onClick={() => setActiveView("settings")} title="设置">
-            <SettingsIcon size={18} /> {!sidebarCollapsed && "设置"}
+            <SettingsIcon size={18} /> {!sidebarCollapsed && <span className="nav-label">设置</span>}
           </button>
         </nav>
         <div className="sidebar-bottom">
@@ -731,6 +862,9 @@ export default function App() {
               <span>模型状态</span>
               <strong>{modelHealthCopy[modelHealth].label}</strong>
               <small>{state.settings.qwen.provider === "opensearch" ? "OpenSearch" : "DashScope"} · {state.settings.qwen.model}</small>
+              <small className="token-usage-line">
+                Token 输入 {formatTokenCount(modelTokenUsage?.input ?? 0)} / 输出 {formatTokenCount(modelTokenUsage?.output ?? 0)}
+              </small>
             </button>
           )}
           <div className="sidebar-meta">
@@ -749,7 +883,11 @@ export default function App() {
 
       <main className="workspace">
         <header className="topbar">
-          <div>
+          <div className="mobile-top-brand">
+            <img src="/logo.svg" alt="浦恒 Logo" />
+            <strong>清大浦恒 AI</strong>
+          </div>
+          <div className="topbar-title">
             <h1>企业智能分析平台</h1>
           </div>
           <div className="top-actions">
@@ -757,11 +895,14 @@ export default function App() {
             {message && <span className="toast">{message}</span>}
             {exportLink && (
               <a className="button ghost" href={exportLink}>
-                <Download size={16} /> 打开 Word
+                <Download size={16} /> Word
               </a>
             )}
             <button className="button primary" onClick={exportDocx} disabled={generatedCount === 0 || Boolean(busy)}>
-              <FileText size={16} /> 生成 Word
+              <FileText size={16} /> Word
+            </button>
+            <button className="button ghost desktop-pdf-export" onClick={exportPdf} disabled={generatedCount === 0 || Boolean(busy)}>
+              <FileText size={16} /> PDF
             </button>
           </div>
         </header>
@@ -779,6 +920,7 @@ export default function App() {
             saveSection={saveSection}
             generateSection={generateSection}
             generateReport={generateReport}
+            exportPdf={exportPdf}
             clearReport={clearReport}
             copyGeneratedReport={copyGeneratedReport}
             pauseGeneration={pauseGeneration}
@@ -786,6 +928,7 @@ export default function App() {
             unlockSection={unlockSection}
             busy={busy}
             generating={generating}
+            generatedCount={generatedCount}
             genProgress={genProgress}
           />
         )}
@@ -867,6 +1010,7 @@ interface DashboardProps {
   saveSection: (id: string, patch: Partial<AnalysisSection>) => Promise<void>;
   generateSection: (id: string) => Promise<void>;
   generateReport: () => Promise<void>;
+  exportPdf: () => void;
   clearReport: () => Promise<void>;
   copyGeneratedReport: () => Promise<void>;
   pauseGeneration: () => void;
@@ -874,6 +1018,7 @@ interface DashboardProps {
   unlockSection: (id: string) => Promise<void>;
   busy: string;
   generating: boolean;
+  generatedCount: number;
   genProgress: { current: string; index: number; total: number } | null;
 }
 
@@ -890,6 +1035,7 @@ function Dashboard(props: DashboardProps) {
     saveSection,
     generateSection,
     generateReport,
+    exportPdf,
     clearReport,
     copyGeneratedReport,
     pauseGeneration,
@@ -897,6 +1043,7 @@ function Dashboard(props: DashboardProps) {
     unlockSection,
     busy,
     generating,
+    generatedCount,
     genProgress
   } = props;
 
@@ -1042,6 +1189,10 @@ function Dashboard(props: DashboardProps) {
             </button>
           </div>
           <div className="tree">
+            <div className="tree-header" aria-hidden="true">
+              <span className="tree-header-depth" title={granularityTitle}>颗粒度</span>
+              <span className="tree-header-confidence" title={confidenceTitle}>置信度</span>
+            </div>
             {flatNodes.map(({ node, level, numbering }) => (
               <div
                 key={node.id}
@@ -1074,12 +1225,13 @@ function Dashboard(props: DashboardProps) {
                   value={node.depth}
                   onChange={(event) => patchNode(node.id, { depth: event.target.value as AnalysisDepth })}
                   onClick={(event) => event.stopPropagation()}
+                  title={granularityTitle}
                 >
                   {depthOptions.map((depth) => (
                     <option key={depth}>{depth}</option>
                   ))}
                 </select>
-                {(() => { const conf = confidenceLabel(state.sections[node.id]?.confidenceScore, node.status); return <span className={`status ${conf.cls}`}>{conf.text}</span>; })()}
+                {(() => { const conf = confidenceLabel(state.sections[node.id]?.confidenceScore, node.status); return <span className={`status ${conf.cls}`} title={confidenceTitle}>{conf.text}</span>; })()}
                 {node.locked && <Lock size={14} className="lock" />}
                 <button className="icon-button" onClick={(event) => { event.stopPropagation(); addSubsection(node.id); }} title="增加二级章节">
                   <Plus size={15} />

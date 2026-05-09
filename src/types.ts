@@ -130,6 +130,14 @@ export interface PromptEngineering {
   depthInstructions: DepthInstructions;
 }
 
+export interface ModelTokenUsage {
+  input: number;
+  output: number;
+  total: number;
+  requests: number;
+  updatedAt?: string;
+}
+
 export interface AppState {
   project: Project;
   settings: Settings;
@@ -138,5 +146,7 @@ export interface AppState {
   files: UploadedFile[];
   sources: Citation[];
   promptEngineering: PromptEngineering;
-  meta?: Record<string, boolean | string | number>;
+  meta?: Record<string, unknown> & {
+    modelTokenUsage?: ModelTokenUsage;
+  };
 }
