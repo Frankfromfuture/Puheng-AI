@@ -3,9 +3,11 @@ import express from "express";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { randomUUID } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
 import multer from "multer";
 import OpenAI from "openai";
+import QRCode from "qrcode";
 import {
   AlignmentType,
   BorderStyle,
@@ -23,17 +25,34 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT = path.resolve(__dirname, "..");
-const DATA_DIR = path.join(ROOT, "data");
+const DATA_DIR = path.resolve(process.env.PUHENG_DATA_DIR || path.join(ROOT, "data"));
 const UPLOAD_DIR = path.join(ROOT, "uploads");
 const EXPORT_DIR = path.join(ROOT, "exports");
 const STATE_FILE = path.join(DATA_DIR, "app-state.json");
+const USERS_DIR = path.join(DATA_DIR, "users");
+const USERS_FILE = path.join(DATA_DIR, "users.json");
+const SESSIONS_FILE = path.join(DATA_DIR, "sessions.json");
+const WECHAT_LOGIN_FILE = path.join(DATA_DIR, "wechat-login-intents.json");
+const SESSION_COOKIE = "puheng_session";
+const SESSION_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 14;
+const WECHAT_LOGIN_MAX_AGE_MS = 1000 * 60 * 5;
+const SEARCH_PRIMARY_CHANNELS = ["sogou", "baidu"];
+const SEARCH_FALLBACK_CHANNELS = ["bing"];
+const SEARCH_QUERY_LIMIT = 6;
+const SEARCH_RESULTS_PER_CHANNEL = 5;
+const SEARCH_TARGET_VALID_RESULTS = 6;
+const SEARCH_MIN_VALID_RESULTS = 4;
+const SEARCH_ENRICH_LIMIT = 3;
+const SEARCH_FINAL_SOURCE_LIMIT = 6;
+const ENABLE_DYNAMIC_SEARCH_QUERIES = false;
+const stateContext = new AsyncLocalStorage();
 
 const app = express();
 const upload = multer({ dest: UPLOAD_DIR });
 
-app.use(cors());
+app.use(cors({ credentials: true, origin: true }));
 app.use(express.json({ limit: "10mb" }));
-app.use("/exports", express.static(EXPORT_DIR));
+app.use(express.urlencoded({ extended: false }));
 
 const depths = ["省略", "简版", "标准", "深入"];
 const knownDefaultNoteIds = new Set([
@@ -54,13 +73,133 @@ const knownDefaultNoteIds = new Set([
   "soe"
 ]);
 
+const DEFAULT_SECTION_SEARCH_KEYWORDS = {
+  "business-registration": [
+    "天眼查 企查查 工商注册",
+    "注册资本 法定代表人 工商变更",
+    "总部地址 成立日期 企业类型"
+  ],
+  "founders-core-team": [
+    "创始人 核心团队 学历 科研 工作经历",
+    "CEO CTO 高管 团队 背景",
+    "创始团队 创业经历 清华 科研"
+  ],
+  shareholding: [
+    "股东 投资方 企查查 天眼查",
+    "前十大股东 实控人 股权比例",
+    "员工持股平台 股权结构 图谱"
+  ],
+  "filings-finance": [
+    "营收 净利润 毛利率 财务数据",
+    "财报 招股书 年报 业绩",
+    "研发投入 现金流 经营变化"
+  ],
+  "negative-info": [
+    "司法诉讼 裁判文书 被执行人",
+    "行政处罚 经营异常 失信",
+    "负面 环保 维权 争议"
+  ],
+  "industry-chain-position": [
+    "产业链上下游 核心产品 服务",
+    "行业地位 市场份额 议价能力",
+    "供应商 客户 供应链"
+  ],
+  competitors: [
+    "竞品 对标企业 竞争对手",
+    "市场竞争 份额 排名 对比",
+    "差异化 优势 劣势 替代品"
+  ],
+  "competitive-advantages": [
+    "核心技术 壁垒 专利 牌照",
+    "产品成熟度 客户粘性 优势",
+    "获奖 资质 行业认可度"
+  ],
+  "upstream-downstream": [
+    "主要客户 合作方 渠道",
+    "供应商 采购 供应链 合作伙伴",
+    "生态 战略合作 签约"
+  ],
+  "financing-progress": [
+    "融资 轮次 投资方 估值",
+    "Pre-A A轮 B轮 IPO 融资",
+    "投资界 投中网 36氪 融资"
+  ],
+  "important-shareholders": [
+    "股东 投资机构 产业投资者 国资",
+    "重要股东 工商变更 增资 投资方",
+    "股权结构 招商局 华泰 国方"
+  ],
+  "industrial-fund-progress": [
+    "产业基金 CVC 出资 LP",
+    "设立基金 管理机构 投资机构",
+    "战略投资 产业布局 基金投向"
+  ],
+  "capital-dynamics": [
+    "并购 重组 上市 辅导 资本动态",
+    "定增 股权转让 回购 重大开支",
+    "资产处置 新闻 投资并购"
+  ],
+  "enterprise-needs": [
+    "战略合作 产业需求 客户需求",
+    "招商 落地 产能 供应链",
+    "业务布局 合作需求 痛点"
+  ],
+  "resource-match": [
+    "合作伙伴 生态 产业资源",
+    "供应链 渠道 客户 资源对接",
+    "场景落地 战略合作"
+  ],
+  "cooperation-priority": [
+    "合作 产业协同 投资价值",
+    "商业化 落地 重点客户",
+    "招商引资 产业园 区域合作"
+  ],
+  "region-match": [
+    "总部 基地 项目落地 区域布局",
+    "生产基地 研发中心 分公司",
+    "政府合作 产业园 落地"
+  ],
+  "investment-attraction": [
+    "招商引资 落地 项目投资",
+    "融资 政府基金 产业基金",
+    "区域合作 产业政策"
+  ],
+  "land-cooperation": [
+    "拿地 用地 厂房 基地",
+    "生产基地 项目建设 产能",
+    "园区 落地 土地"
+  ],
+  "leasing-landing": [
+    "办公 研发中心 厂房 租赁",
+    "入驻 园区 载体 空间",
+    "区域布局 落地载体"
+  ],
+  "landing-fund": [
+    "产业基金 政府基金 引导基金",
+    "融资 落地 基金合作",
+    "投资机构 股东 出资基金"
+  ],
+  risks: [
+    "风险 经营风险 财务风险",
+    "诉讼 行政处罚 经营异常",
+    "融资风险 竞争风险 合规风险"
+  ]
+};
+
+function defaultSearchKeywordsForNode(node) {
+  const currentYear = new Date().getFullYear();
+  const defaults = DEFAULT_SECTION_SEARCH_KEYWORDS[node.id] ?? [];
+  const generic = [`${node.title || ""} 最新 ${currentYear}`, `${node.title || ""} 公开资料`].filter(Boolean);
+  return [...defaults, ...generic].join("；");
+}
+
 const researchRequirements = {
   brief: {
     label: "简要分析",
     instruction: "只生成一级目录，二级及以下目录省略；一级目录采用标准颗粒度，输出关键判断、直接依据和必要缺口。"
   },
   fundamental: {
-    label: "基本面深度分析",
+    label: "基础深度分析",
     instruction: "深入分析主体资质、团队、股东、财务、资产和经营质量，并说明基本面对投资价值、落地承载和合作可信度的影响。"
   },
   investment: {
@@ -141,8 +280,8 @@ function node(id, title, children = [], depth = "标准") {
   };
 }
 
-function citation(id, title, sourceType, usedIn, url = "", publishedAt = "") {
-  return { id, title, sourceType, usedIn, url, publishedAt };
+function citation(id, title, sourceType, usedIn, url = "", publishedAt = "", companyName = "") {
+  return { id, title, sourceType, usedIn, url, publishedAt, companyName };
 }
 
 function defaultFramework() {
@@ -238,6 +377,7 @@ function normalizeReportNode(node) {
     includeInWord: typeof node.includeInWord === "boolean" ? node.includeInWord : true,
     depth,
     notes: typeof node.notes === "string" ? node.notes : "",
+    searchKeywords: typeof node.searchKeywords === "string" ? node.searchKeywords : "",
     status,
     locked: Boolean(node.locked),
     children: Array.isArray(node.children) ? node.children.map(normalizeReportNode) : []
@@ -409,25 +549,286 @@ async function ensureStorage() {
   await fs.mkdir(DATA_DIR, { recursive: true });
   await fs.mkdir(UPLOAD_DIR, { recursive: true });
   await fs.mkdir(EXPORT_DIR, { recursive: true });
+  await fs.mkdir(USERS_DIR, { recursive: true });
+  await ensureJsonFile(USERS_FILE, []);
+  await ensureJsonFile(SESSIONS_FILE, []);
+  await ensureJsonFile(WECHAT_LOGIN_FILE, []);
+}
+
+async function ensureJsonFile(file, fallback) {
   try {
-    await fs.access(STATE_FILE);
+    await fs.access(file);
   } catch {
-    await writeState(defaultState());
+    await fs.writeFile(file, JSON.stringify(fallback, null, 2), "utf8");
   }
 }
 
-async function readState() {
+function slugifyUserId(id) {
+  return String(id).replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+function currentUserId() {
+  const userId = stateContext.getStore()?.userId;
+  if (!userId) {
+    const error = new Error("请先登录。");
+    error.status = 401;
+    throw error;
+  }
+  return userId;
+}
+
+function userDir(userId = currentUserId()) {
+  return path.join(USERS_DIR, slugifyUserId(userId));
+}
+
+function userStateFile(userId = currentUserId()) {
+  return path.join(userDir(userId), "app-state.json");
+}
+
+function userExportDir(userId = currentUserId()) {
+  return path.join(EXPORT_DIR, "users", slugifyUserId(userId));
+}
+
+async function readJsonFile(file, fallback) {
+  await ensureJsonFile(file, fallback);
+  const raw = await fs.readFile(file, "utf8");
+  return JSON.parse(raw || JSON.stringify(fallback));
+}
+
+async function writeJsonFile(file, value) {
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, JSON.stringify(value, null, 2), "utf8");
+}
+
+async function readUsers() {
   await ensureStorage();
-  const raw = await fs.readFile(STATE_FILE, "utf8");
+  return readJsonFile(USERS_FILE, []);
+}
+
+async function writeUsers(users) {
+  await writeJsonFile(USERS_FILE, users);
+}
+
+async function readSessions() {
+  await ensureStorage();
+  return readJsonFile(SESSIONS_FILE, []);
+}
+
+async function writeSessions(sessions) {
+  await writeJsonFile(SESSIONS_FILE, sessions);
+}
+
+async function readWechatLoginIntents() {
+  await ensureStorage();
+  const now = Date.now();
+  const intents = await readJsonFile(WECHAT_LOGIN_FILE, []);
+  const active = intents.filter((item) => new Date(item.expiresAt).getTime() > now || item.status === "confirmed");
+  if (active.length !== intents.length) await writeJsonFile(WECHAT_LOGIN_FILE, active);
+  return active;
+}
+
+async function writeWechatLoginIntents(intents) {
+  await writeJsonFile(WECHAT_LOGIN_FILE, intents);
+}
+
+function hashPassword(password, salt = randomBytes(16).toString("hex")) {
+  const hash = scryptSync(password, salt, 64).toString("hex");
+  return `${salt}:${hash}`;
+}
+
+function verifyPassword(password, storedHash) {
+  const [salt, hash] = String(storedHash || "").split(":");
+  if (!salt || !hash) return false;
+  const candidate = scryptSync(password, salt, 64);
+  const actual = Buffer.from(hash, "hex");
+  return actual.length === candidate.length && timingSafeEqual(actual, candidate);
+}
+
+function hashToken(token) {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+function parseCookies(header = "") {
+  return Object.fromEntries(
+    header
+      .split(";")
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .map((part) => {
+        const index = part.indexOf("=");
+        return index === -1
+          ? [part, ""]
+          : [decodeURIComponent(part.slice(0, index)), decodeURIComponent(part.slice(index + 1))];
+      })
+  );
+}
+
+function setSessionCookie(res, token) {
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  res.setHeader(
+    "Set-Cookie",
+    `${SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${Math.floor(SESSION_MAX_AGE_MS / 1000)}${secure}`
+  );
+}
+
+function clearSessionCookie(res) {
+  res.setHeader("Set-Cookie", `${SESSION_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`);
+}
+
+function publicUser(user) {
+  if (!user) return null;
+  return {
+    id: user.id,
+    username: user.username,
+    displayName: user.displayName || user.username,
+    authProvider: user.authProvider || "password",
+    createdAt: user.createdAt,
+    lastLoginAt: user.lastLoginAt
+  };
+}
+
+function publicBaseUrl(req) {
+  return String(process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get("host")}`).replace(/\/+$/, "");
+}
+
+function wechatConfigured() {
+  return Boolean(process.env.WECHAT_APP_ID && process.env.WECHAT_APP_SECRET);
+}
+
+function wechatRedirectUri(req) {
+  return process.env.WECHAT_REDIRECT_URI || `${publicBaseUrl(req)}/api/auth/wechat/callback`;
+}
+
+function wechatAuthorizeUrl(req, state) {
+  const params = new URLSearchParams({
+    appid: process.env.WECHAT_APP_ID || "",
+    redirect_uri: wechatRedirectUri(req),
+    response_type: "code",
+    scope: "snsapi_login",
+    state
+  });
+  return `https://open.weixin.qq.com/connect/qrconnect?${params.toString()}#wechat_redirect`;
+}
+
+async function createWechatUser(profile) {
+  const now = new Date().toISOString();
+  const openId = String(profile.openid || "").trim();
+  const unionId = String(profile.unionid || "").trim();
+  const users = await readUsers();
+  let user = users.find((item) => (
+    (unionId && item.wechatUnionId === unionId) ||
+    (openId && item.wechatOpenId === openId)
+  ));
+
+  if (!user) {
+    const identity = unionId || openId || randomUUID();
+    user = {
+      id: `wechat_${createHash("sha256").update(identity).digest("hex").slice(0, 24)}`,
+      username: `wechat_${createHash("sha256").update(identity).digest("hex").slice(0, 12)}`,
+      displayName: String(profile.nickname || "微信用户").trim() || "微信用户",
+      passwordHash: "",
+      authProvider: "wechat",
+      wechatOpenId: openId,
+      wechatUnionId: unionId,
+      avatarUrl: profile.headimgurl || "",
+      createdAt: now,
+      lastLoginAt: now
+    };
+    users.push(user);
+  } else {
+    user.displayName = String(profile.nickname || user.displayName || "微信用户").trim();
+    user.avatarUrl = profile.headimgurl || user.avatarUrl || "";
+    user.wechatOpenId = openId || user.wechatOpenId || "";
+    user.wechatUnionId = unionId || user.wechatUnionId || "";
+    user.authProvider = "wechat";
+    user.lastLoginAt = now;
+  }
+
+  await writeUsers(users);
+  await ensureUserState(user.id);
+  return user;
+}
+
+async function markWechatIntentConfirmed(state, userId) {
+  const intents = await readWechatLoginIntents();
+  const intent = intents.find((item) => item.state === state);
+  if (!intent) return null;
+  intent.status = "confirmed";
+  intent.userId = userId;
+  intent.confirmedAt = new Date().toISOString();
+  await writeWechatLoginIntents(intents);
+  return intent;
+}
+
+async function ensureUserState(userId) {
+  await fs.mkdir(userDir(userId), { recursive: true });
+  const target = userStateFile(userId);
+  try {
+    await fs.access(target);
+    return;
+  } catch {
+    let initialState = defaultState();
+    try {
+      await fs.access(STATE_FILE);
+      const users = await readUsers();
+      if (users.length <= 1) {
+        initialState = JSON.parse(await fs.readFile(STATE_FILE, "utf8"));
+      }
+    } catch {
+      // Use a fresh default state when no legacy single-user state exists.
+    }
+    await fs.writeFile(target, JSON.stringify(initialState, null, 2), "utf8");
+  }
+}
+
+async function readState(userId = currentUserId()) {
+  await ensureStorage();
+  await ensureUserState(userId);
+  const raw = await fs.readFile(userStateFile(userId), "utf8");
   const state = JSON.parse(raw);
   const changed = migrateState(state);
-  if (changed) await writeState(state);
+  if (changed) await writeState(state, userId);
   return state;
 }
 
-async function writeState(state) {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-  await fs.writeFile(STATE_FILE, JSON.stringify(state, null, 2), "utf8");
+async function writeState(state, userId = currentUserId()) {
+  await fs.mkdir(userDir(userId), { recursive: true });
+  await fs.writeFile(userStateFile(userId), JSON.stringify(state, null, 2), "utf8");
+}
+
+function isAutomaticSearchSource(source) {
+  return String(source?.sourceType || "").includes("自动公开检索") || String(source?.id || "").startsWith("web-search");
+}
+
+function sourceMatchesCompany(source, companyName) {
+  const normalizedCompany = String(companyName || "").trim().toLowerCase();
+  if (!normalizedCompany) return true;
+  const sourceCompany = String(source?.companyName || "").trim().toLowerCase();
+  if (sourceCompany) return sourceCompany === normalizedCompany;
+  const visibleText = `${source?.title || ""} ${source?.snippet || ""}`.toLowerCase();
+  return visibleText.includes(normalizedCompany);
+}
+
+function removeAutomaticSourcesForOtherCompanies(state, companyName) {
+  const before = state.sources?.length ?? 0;
+  state.sources = (state.sources ?? []).filter((source) => {
+    if (!isAutomaticSearchSource(source)) return true;
+    return sourceMatchesCompany(source, companyName);
+  });
+  return before - state.sources.length;
+}
+
+function markCurrentCompanySources(state) {
+  const companyName = String(state.project?.companyName || "").trim();
+  if (!companyName) return 0;
+  let changed = 0;
+  for (const source of state.sources ?? []) {
+    if (isAutomaticSearchSource(source) && !source.companyName && sourceMatchesCompany(source, companyName)) {
+      source.companyName = companyName;
+      changed += 1;
+    }
+  }
+  return changed;
 }
 
 
@@ -589,6 +990,26 @@ function migrateState(state) {
     state.promptEngineering.depthInstructions["省略"] = DEFAULT_DEPTH_INSTRUCTIONS["省略"];
     changed = true;
   }
+  if (!state.meta.searchKeywordsV1) {
+    walk(state.framework ?? [], (node) => {
+      if (!String(node.searchKeywords || "").trim()) {
+        node.searchKeywords = defaultSearchKeywordsForNode(node);
+        changed = true;
+      }
+    });
+    state.meta.searchKeywordsV1 = true;
+    changed = true;
+  }
+  if (!state.meta.sourceCompanyScopeV1) {
+    const removed = removeAutomaticSourcesForOtherCompanies(state, state.project?.companyName);
+    const marked = markCurrentCompanySources(state);
+    state.meta.sourceCompanyScopeV1 = {
+      appliedAt: new Date().toISOString(),
+      removedAutomaticSources: removed,
+      markedAutomaticSources: marked
+    };
+    changed = true;
+  }
   if (!state.meta.defaultModelFlashV1) {
     if (["deepseek-v4-pro", "qwen-plus"].includes(state.settings?.qwen?.model)) {
       state.settings.qwen.model = "deepseek-v4-flash";
@@ -620,6 +1041,47 @@ function publicState(state) {
       }
     }
   };
+}
+
+async function findUserFromRequest(req) {
+  const token = parseCookies(req.headers.cookie || "")[SESSION_COOKIE];
+  if (!token) return null;
+  const tokenHash = hashToken(token);
+  const now = Date.now();
+  const sessions = await readSessions();
+  const session = sessions.find((item) => item.tokenHash === tokenHash && new Date(item.expiresAt).getTime() > now);
+  if (!session) return null;
+  const users = await readUsers();
+  return users.find((item) => item.id === session.userId) || null;
+}
+
+async function requireAuth(req, res, next) {
+  try {
+    const user = await findUserFromRequest(req);
+    if (!user) {
+      res.status(401).json({ message: "请先登录。" });
+      return;
+    }
+    req.user = user;
+    stateContext.run({ userId: user.id }, () => next());
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function createSessionForUser(user, res) {
+  const token = randomBytes(32).toString("base64url");
+  const expiresAt = new Date(Date.now() + SESSION_MAX_AGE_MS).toISOString();
+  const sessions = (await readSessions()).filter((item) => new Date(item.expiresAt).getTime() > Date.now());
+  sessions.push({
+    id: randomUUID(),
+    userId: user.id,
+    tokenHash: hashToken(token),
+    createdAt: new Date().toISOString(),
+    expiresAt
+  });
+  await writeSessions(sessions);
+  setSessionCookie(res, token);
 }
 
 function syncSectionsWithFramework(state) {
@@ -832,119 +1294,22 @@ async function searchQueriesForSection(state, reportNode) {
   const companyName = state.project.companyName?.trim();
   if (!companyName) return [];
   const quoted = `"${companyName}"`;
-  const currentYear = new Date().getFullYear();
+  const currentYear = 2026;
+  const fallbackYear = 2025;
+  const yearPrefix = (keyword) => [
+    `${quoted} ${currentYear} 最新 ${keyword}`,
+    `${quoted} ${currentYear} ${keyword}`,
+    `${quoted} ${fallbackYear} 最新 ${keyword}`,
+    `${quoted} ${fallbackYear} ${keyword}`
+  ];
 
   const sectionQueries = {
-    "business-registration": [
-      `${quoted} 天眼查 企查查 工商注册`,
-      `${quoted} 注册资本 法定代表人 工商变更`,
-      `${quoted} 总部地址 成立日期 企业类型`
-    ],
-    "founders-core-team": [
-      `${quoted} 创始人 核心团队 学历 科研 工作经历`,
-      `${quoted} CEO CTO 高管 团队 背景`,
-      `${quoted} 创始团队 创业经历 清华 科研`
-    ],
-    "shareholding": [
-      `${quoted} 股东 投资方 企查查 天眼查`,
-      `${quoted} 前十大股东 实控人 股权比例`,
-      `${quoted} 员工持股平台 股权结构 图谱`
-    ],
-    "filings-finance": [
-      `${quoted} 营收 净利润 毛利率 财务数据`,
-      `${quoted} 财报 招股书 年报 业绩`,
-      `${quoted} 研发投入 现金流 经营变化`
-    ],
-    "negative-info": [
-      `${quoted} 司法诉讼 裁判文书 被执行人`,
-      `${quoted} 行政处罚 经营异常 失信`,
-      `${quoted} 负面 环保 维权 争议`
-    ],
-    "industry-chain-position": [
-      `${quoted} 产业链上下游 核心产品 服务`,
-      `${quoted} 行业地位 市场份额 议价能力`,
-      `${quoted} 供应商 客户 供应链`
-    ],
-    competitors: [
-      `${quoted} 竞品 对标企业 竞争对手`,
-      `${quoted} 市场竞争 份额 排名 对比`,
-      `${quoted} 差异化 优势 劣势 替代品`
-    ],
-    "competitive-advantages": [
-      `${quoted} 核心技术 壁垒 专利 牌照`,
-      `${quoted} 产品成熟度 客户粘性 优势`,
-      `${quoted} 获奖 资质 行业认可度`
-    ],
-    "upstream-downstream": [
-      `${quoted} 主要客户 合作方 渠道`,
-      `${quoted} 供应商 采购 供应链 合作伙伴`,
-      `${quoted} 生态 战略合作 签约`
-    ],
-    "financing-progress": [
-      `${quoted} 融资 轮次 投资方 估值`,
-      `${quoted} Pre-A A轮 B轮 IPO 融资`,
-      `${quoted} 投资界 投中网 36氪 融资`
-    ],
-    "important-shareholders": [
-      `${quoted} 股东 投资机构 产业投资者 国资`,
-      `${quoted} 重要股东 工商变更 增资 投资方`,
-      `${quoted} 股权结构 招商局 华泰 国方`
-    ],
-    "industrial-fund-progress": [
-      `${quoted} 产业基金 CVC 出资 LP`,
-      `${quoted} 设立基金 管理机构 投资机构`,
-      `${quoted} 战略投资 产业布局 基金投向`
-    ],
-    "capital-dynamics": [
-      `${quoted} 并购 重组 上市 辅导 资本动态`,
-      `${quoted} 定增 股权转让 回购 重大开支`,
-      `${quoted} 资产处置 新闻 投资并购`
-    ],
-    "enterprise-needs": [
-      `${quoted} 战略合作 产业需求 客户需求`,
-      `${quoted} 招商 落地 产能 供应链`,
-      `${quoted} 业务布局 合作需求 痛点`
-    ],
-    "resource-match": [
-      `${quoted} 合作伙伴 生态 产业资源`,
-      `${quoted} 供应链 渠道 客户 资源对接`,
-      `${quoted} 场景落地 战略合作`
-    ],
-    "cooperation-priority": [
-      `${quoted} 合作 产业协同 投资价值`,
-      `${quoted} 商业化 落地 重点客户`,
-      `${quoted} 招商引资 产业园 区域合作`
-    ],
-    "region-match": [
-      `${quoted} 总部 基地 项目落地 区域布局`,
-      `${quoted} 生产基地 研发中心 分公司`,
-      `${quoted} 政府合作 产业园 落地`
-    ],
-    "investment-attraction": [
-      `${quoted} 招商引资 落地 项目投资`,
-      `${quoted} 融资 政府基金 产业基金`,
-      `${quoted} 区域合作 产业政策`
-    ],
-    "land-cooperation": [
-      `${quoted} 拿地 用地 厂房 基地`,
-      `${quoted} 生产基地 项目建设 产能`,
-      `${quoted} 园区 落地 土地`
-    ],
-    "leasing-landing": [
-      `${quoted} 办公 研发中心 厂房 租赁`,
-      `${quoted} 入驻 园区 载体 空间`,
-      `${quoted} 区域布局 落地载体`
-    ],
-    "landing-fund": [
-      `${quoted} 产业基金 政府基金 引导基金`,
-      `${quoted} 融资 落地 基金合作`,
-      `${quoted} 投资机构 股东 出资基金`
-    ],
-    risks: [
-      `${quoted} 风险 经营风险 财务风险`,
-      `${quoted} 诉讼 行政处罚 经营异常`,
-      `${quoted} 融资风险 竞争风险 合规风险`
-    ]
+    ...Object.fromEntries(
+      Object.entries(DEFAULT_SECTION_SEARCH_KEYWORDS).map(([id, keywords]) => [
+        id,
+        keywords.flatMap(yearPrefix)
+      ])
+    )
   };
 
   const capitalDomains = ["pedaily.cn", "chinaventure.com.cn", "36kr.com", "tmtpost.com", "lieyunwang.com", "iyiou.com", "laoyaoba.com", "sohu.com"];
@@ -953,39 +1318,80 @@ async function searchQueriesForSection(state, reportNode) {
   const domainHints = new Set();
 
   if (["business-registration", "shareholding", "important-shareholders", "negative-info"].includes(reportNode.id)) {
-    registryDomains.forEach((domain) => domainHints.add(`site:${domain} ${quoted} ${reportNode.title}`));
+    registryDomains.forEach((domain) => {
+      domainHints.add(`site:${domain} ${quoted} ${currentYear} ${reportNode.title}`);
+      domainHints.add(`site:${domain} ${quoted} ${fallbackYear} ${reportNode.title}`);
+    });
   }
   if (["financing-progress", "important-shareholders", "industrial-fund-progress", "capital-dynamics"].includes(reportNode.id)) {
-    capitalDomains.forEach((domain) => domainHints.add(`site:${domain} ${quoted} 融资 投资方 股东`));
+    capitalDomains.forEach((domain) => {
+      domainHints.add(`site:${domain} ${quoted} ${currentYear} 融资 投资方 股东`);
+      domainHints.add(`site:${domain} ${quoted} ${fallbackYear} 融资 投资方 股东`);
+    });
   }
   if (["industry-chain-position", "competitors", "competitive-advantages", "upstream-downstream", "enterprise-needs", "resource-match", "cooperation-priority", "region-match", "investment-attraction"].includes(reportNode.id)) {
-    newsDomains.forEach((domain) => domainHints.add(`site:${domain} ${quoted} ${reportNode.title}`));
+    newsDomains.forEach((domain) => {
+      domainHints.add(`site:${domain} ${quoted} ${currentYear} ${reportNode.title}`);
+      domainHints.add(`site:${domain} ${quoted} ${fallbackYear} ${reportNode.title}`);
+    });
   }
 
   const genericQueries = [
-    `${quoted} ${reportNode.title || ""} 最新 ${currentYear}`,
-    `${quoted} ${reportNode.title || ""} 公开资料`,
-    `${quoted} ${reportNode.notes ? reportNode.notes.slice(0, 24) : reportNode.title || ""}`
+    `${quoted} ${currentYear} 最新 ${reportNode.title || ""}`,
+    `${quoted} ${currentYear} ${reportNode.title || ""} 公开资料`,
+    `${quoted} ${fallbackYear} 最新 ${reportNode.title || ""}`,
+    `${quoted} ${fallbackYear} ${reportNode.title || ""} 公开资料`,
+    `${quoted} ${currentYear} ${reportNode.notes ? reportNode.notes.slice(0, 24) : reportNode.title || ""}`,
+    `${quoted} ${fallbackYear} ${reportNode.notes ? reportNode.notes.slice(0, 24) : reportNode.title || ""}`
   ];
 
+  const sectionFreshnessQueries = {
+    "filings-finance": [
+      `${quoted} ${currentYear} 财务数据 营收 毛利率 净利润`,
+      `${quoted} ${currentYear} 年报 招股书 财务`,
+      `${quoted} ${fallbackYear} 年报 财务数据 营收`,
+      `${quoted} ${fallbackYear} 招股书 财务 营收`
+    ],
+    "business-registration": [
+      `${quoted} ${currentYear} 工商变更 股份制改革`,
+      `${quoted} ${fallbackYear} 工商变更 股份制改革`
+    ],
+    "financing-progress": [
+      `${quoted} ${currentYear} 融资 最新 投资方`,
+      `${quoted} ${fallbackYear} 融资 最新 投资方`
+    ],
+    "capital-dynamics": [
+      `${quoted} ${currentYear} IPO 上市 辅导 融资`,
+      `${quoted} ${fallbackYear} IPO 上市 辅导 融资`
+    ]
+  };
+
+  const keywordQueries = String(reportNode.searchKeywords || "")
+    .split(/[\n,，;；、]+/)
+    .map((keyword) => keyword.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .flatMap(yearPrefix);
+
   const baseQueries = [
+    ...(sectionFreshnessQueries[reportNode.id] ?? []),
+    ...keywordQueries,
     ...(sectionQueries[reportNode.id] ?? []),
     ...genericQueries,
     ...domainHints
   ];
 
   const dynamicQueries = [];
-  if (reportNode.notes) {
+  if (ENABLE_DYNAMIC_SEARCH_QUERIES && (reportNode.notes || reportNode.searchKeywords)) {
     const { apiKey, baseUrl, model, provider, openSearchHost, openSearchAppName } = state.settings.qwen;
     if (apiKey) {
       const messages = [
         {
           role: "system",
-          content: "你是一个专业的企业调查搜索专家。你需要根据用户的分析章节标题和提示词要求，提取出3到4个最精准的短小查询词组，用于搜索引擎检索。对于工商、股东、财务等强事实节点，请主动在搜索词中加上『企查查』、『天眼查』、『持股比例』、『招股书』等具有极强定向搜索能力的词汇。必须返回严格的JSON对象格式，包含 queries 数组，例如：{\"queries\": [\"企业名 关键词1\", \"企业名 关键词2\"]}。不要返回其他内容。"
+          content: `你是一个专业的企业调查搜索专家。你需要根据用户的分析章节标题和提示词要求，提取出3到4个最精准的短小查询词组，用于搜索引擎检索。所有检索词必须优先包含 ${currentYear}，兜底可包含 ${fallbackYear}，不得生成 ${fallbackYear - 1} 及以前年份作为最新检索词。对于工商、股东、财务等强事实节点，请主动在搜索词中加上『企查查』、『天眼查』、『持股比例』、『招股书』等具有极强定向搜索能力的词汇。必须返回严格的JSON对象格式，包含 queries 数组，例如：{\"queries\": [\"企业名 ${currentYear} 关键词1\", \"企业名 ${fallbackYear} 关键词2\"]}。不要返回其他内容。`
         },
         {
           role: "user",
-          content: `目标企业：${companyName}\n章节标题：${reportNode.title}\n章节提示词要求：${reportNode.notes}\n\n请提取3个检索词组（必须包含企业名称）：`
+          content: `目标企业：${companyName}\n章节标题：${reportNode.title}\n信息检索关键词：${reportNode.searchKeywords || "无"}\n章节提示词要求：${reportNode.notes || "无"}\n\n请提取3个检索词组（必须包含企业名称）：`
         }
       ];
 
@@ -1024,7 +1430,7 @@ async function searchQueriesForSection(state, reportNode) {
     .map((query) => query.replace(/\s+/g, " ").trim())
     .filter((query) => query.includes(companyName));
 
-  return [...new Set(queries)].slice(0, 10);
+  return [...new Set(queries)].slice(0, SEARCH_QUERY_LIMIT);
 }
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
@@ -1169,17 +1575,75 @@ function extractPublishedAt(text = "") {
   return `${match[1]}-${month}-${day}`;
 }
 
+function latestYearInText(text = "") {
+  const years = [...String(text).matchAll(/\b(20\d{2})\b|(?:^|[^\d])(20\d{2})年/g)]
+    .map((match) => Number(match[1] || match[2]))
+    .filter((year) => Number.isFinite(year));
+  return years.length ? Math.max(...years) : 0;
+}
+
 function sourceQualityScore(item, companyName) {
   const text = `${item.title} ${item.snippet} ${item.url}`.toLowerCase();
   let score = 0;
   if (text.includes(companyName.toLowerCase())) score += 30;
-  if (/20\d{2}/.test(text)) score += 8;
+  const currentYear = 2026;
+  const latestYear = latestYearInText(text);
+  if (latestYear >= currentYear) score += 36;
+  else if (latestYear === 2025) score += 22;
+  else if (latestYear <= 2024 && latestYear > 0) score -= 30;
+  else if (latestYear > 0) score -= 18;
   if (/融资|投资方|股东|估值|营收|净利润|高管|创始人|专利|客户|合作|并购|上市/.test(text)) score += 12;
   if (/pedaily|chinaventure|36kr|tmtpost|lieyunwang|iyiou|laoyaoba|qcc|tianyancha|aiqicha|yicai|stcn|cls|jiemian/.test(text)) score += 16;
   if (/pre[\s-]?a|a\+|b\+|种子轮|天使轮|领投|跟投|累计融资|募集资金/.test(text)) score += 10;
   if (/内容由ai智能生成|ai导读|小说阅读器|会员登录/.test(text)) score -= 24;
   if (/baidu\.com\/link|sogou\.com\/link|weixin\.sogou/.test(text)) score -= 4;
   return score;
+}
+
+function sectionRelevanceScore(item, reportNode) {
+  const text = `${item.title} ${item.snippet}`.toLowerCase();
+  const titleTerms = String(reportNode.title || "")
+    .split(/[\s/、，,；;（）()]+/)
+    .map((term) => term.trim())
+    .filter((term) => term.length >= 2);
+  let score = 0;
+  for (const term of titleTerms) {
+    if (text.includes(term.toLowerCase())) score += 8;
+  }
+  const id = reportNode.id;
+  const keywordGroups = {
+    "business-registration": /工商|注册资本|法定代表人|成立日期|统一社会信用代码|经营范围/,
+    "shareholding": /股东|持股|出资|股权|实控人|投资方/,
+    "important-shareholders": /股东|持股|出资|股权|实控人|投资方/,
+    "financing-progress": /融资|轮次|投资方|估值|领投|跟投|天使轮|a轮|b轮/,
+    "filings-finance": /营收|净利润|毛利率|财务|年报|公告|现金流/,
+    "negative-info": /诉讼|处罚|失信|被执行|经营异常|风险/,
+    competitors: /竞品|竞争|对手|市场份额|排名/,
+    "industry-chain-position": /产业链|上下游|客户|供应商|产品|行业地位/
+  };
+  if (keywordGroups[id]?.test(text)) score += 18;
+  return score;
+}
+
+function rankSearchResults(items, companyName, reportNode) {
+  const seen = new Set();
+  const cnLower = companyName.toLowerCase();
+  return items
+    .filter((item) => {
+      const lc = (item.title + " " + item.snippet).toLowerCase();
+      return lc.includes(cnLower);
+    })
+    .filter((item) => {
+      const key = `${item.title}|${item.url}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .map((item) => ({
+      ...item,
+      score: sourceQualityScore(item, companyName) + sectionRelevanceScore(item, reportNode)
+    }))
+    .sort((a, b) => b.score - a.score);
 }
 
 async function enrichSearchResult(item, companyName) {
@@ -1218,7 +1682,7 @@ async function enrichSearchResult(item, companyName) {
 
 async function searchPublicSources(state, reportNode) {
   const companyName = state.project.companyName?.trim();
-  const queries = await searchQueriesForSection(state, reportNode);
+  const queries = (await searchQueriesForSection(state, reportNode)).slice(0, SEARCH_QUERY_LIMIT);
   if (queries.length === 0) return [];
 
   const collected = [];
@@ -1230,12 +1694,12 @@ async function searchPublicSources(state, reportNode) {
   const isValidResult = (item) => {
     if (!companyName) return true;
     const lc = (item.title + " " + item.snippet).toLowerCase();
-    return lc.includes(companyName.toLowerCase()) || item.query.toLowerCase().includes(companyName.toLowerCase());
+    return lc.includes(companyName.toLowerCase());
   };
 
   const collectFrom = async (channel, query) => {
     if (channel === "baidu") {
-      const baiduUrl = `https://www.baidu.com/s?wd=${encodeURIComponent(query)}&rn=10`;
+      const baiduUrl = `https://www.baidu.com/s?wd=${encodeURIComponent(query)}&rn=${SEARCH_RESULTS_PER_CHANNEL}`;
       const response = await fetchWithTimeout(baiduUrl, { headers });
       if (!response.ok) return [];
       const html = await response.text();
@@ -1251,69 +1715,64 @@ async function searchPublicSources(state, reportNode) {
         const snippet = stripHtml(snippetMatch?.[1] ?? "");
         if (!snippet) continue;
         items.push({ title, url: absoluteSearchUrl(linkMatch[1], "https://www.baidu.com"), snippet, query, channel: "百度" });
+        if (items.length >= SEARCH_RESULTS_PER_CHANNEL) break;
       }
       return items;
     }
     if (channel === "sogou") {
-      const sogouUrl = `https://www.sogou.com/web?query=${encodeURIComponent(query)}&num=10`;
+      const sogouUrl = `https://www.sogou.com/web?query=${encodeURIComponent(query)}&num=${SEARCH_RESULTS_PER_CHANNEL}`;
       const response = await fetchWithTimeout(sogouUrl, { headers });
       if (!response.ok) return [];
-      return parseSogouResults(await response.text(), query, 10).map((item) => ({ ...item, channel: "搜狗" }));
+      return parseSogouResults(await response.text(), query, SEARCH_RESULTS_PER_CHANNEL).map((item) => ({ ...item, channel: "搜狗" }));
     }
     if (channel === "so360") {
       const soUrl = `https://www.so.com/s?q=${encodeURIComponent(query)}&pn=1`;
       const response = await fetchWithTimeout(soUrl, { headers, redirect: "manual" });
       if (!response.ok && response.status < 300) return [];
-      return parseSo360Results(await response.text(), query, 10).map((item) => ({ ...item, channel: "360搜索" }));
+      return parseSo360Results(await response.text(), query, SEARCH_RESULTS_PER_CHANNEL).map((item) => ({ ...item, channel: "360搜索" }));
     }
     const bingUrl = `https://www.bing.com/search?q=${encodeURIComponent(query)}&mkt=zh-CN`;
     const response = await fetchWithTimeout(bingUrl, { headers });
     if (!response.ok) return [];
-    return parseBingResults(await response.text(), query, 10).map((item) => ({ ...item, channel: "Bing" }));
+    return parseBingResults(await response.text(), query, SEARCH_RESULTS_PER_CHANNEL).map((item) => ({ ...item, channel: "Bing" }));
   };
 
-  for (const query of queries) {
-    for (const channel of ["baidu", "sogou", "so360", "bing"]) {
+  const collectChannels = async (channels, query) => {
+    for (const channel of channels) {
       try {
         const items = await collectFrom(channel, query);
         collected.push(...items.filter(isValidResult));
       } catch { /* ignore */ }
-      if (collected.length >= 24) break;
     }
-    if (collected.length >= 24) break;
+  };
+
+  for (const query of queries) {
+    await collectChannels(SEARCH_PRIMARY_CHANNELS, query);
+    if (rankSearchResults(collected, companyName, reportNode).length >= SEARCH_TARGET_VALID_RESULTS) break;
   }
 
-  // Dedup: accept results where title+snippet contain company name, or where the query itself was company-focused
-  const seen = new Set();
-  const cnLower = companyName.toLowerCase();
-  const filtered = collected
-    .filter((item) => {
-      const lc = (item.title + " " + item.snippet).toLowerCase();
-      return lc.includes(cnLower) || item.query.toLowerCase().includes(cnLower);
-    })
-    .filter((item) => {
-      const key = `${item.title}|${item.url}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-
-  const ranked = filtered
-    .map((item) => ({ ...item, score: sourceQualityScore(item, companyName) }))
-    .sort((a, b) => b.score - a.score);
-  const enriched = [];
-  for (const item of ranked.slice(0, 12)) {
-    enriched.push(await enrichSearchResult(item, companyName));
+  if (rankSearchResults(collected, companyName, reportNode).length < SEARCH_MIN_VALID_RESULTS) {
+    for (const query of queries.slice(0, 3)) {
+      await collectChannels(SEARCH_FALLBACK_CHANNELS, query);
+      if (rankSearchResults(collected, companyName, reportNode).length >= SEARCH_MIN_VALID_RESULTS) break;
+    }
   }
-  const strong = enriched.filter((i) => i.snippet.toLowerCase().includes(cnLower));
-  const weak = enriched.filter((i) => !i.snippet.toLowerCase().includes(cnLower));
-  const merged = [...strong, ...weak]
-    .map((item) => ({ ...item, score: sourceQualityScore(item, companyName) }))
+
+  const ranked = rankSearchResults(collected, companyName, reportNode);
+  const enrichedTop = await Promise.all(
+    ranked.slice(0, SEARCH_ENRICH_LIMIT).map((item) => enrichSearchResult(item, companyName))
+  );
+  const merged = [...enrichedTop, ...ranked.slice(SEARCH_ENRICH_LIMIT)]
+    .map((item) => ({
+      ...item,
+      score: sourceQualityScore(item, companyName) + sectionRelevanceScore(item, reportNode)
+    }))
     .sort((a, b) => b.score - a.score)
-    .slice(0, 12);
+    .slice(0, SEARCH_FINAL_SOURCE_LIMIT);
 
   if (merged.length > 0) {
-    console.log(`[search] ${companyName}｜${reportNode.title}｜${merged.length}条｜${queries.slice(0, 4).join(" / ")}`);
+    const channels = [...new Set(merged.map((item) => item.channel || "网页"))].join("、");
+    console.log(`[search] ${companyName}｜${reportNode.title}｜${merged.length}条｜${channels}｜${queries.slice(0, 3).join(" / ")}`);
   } else {
     console.log(`[search] ${companyName}｜${reportNode.title}｜未检索到有效结果`);
   }
@@ -1326,7 +1785,8 @@ async function searchPublicSources(state, reportNode) {
     publishedAt: extractPublishedAt(`${item.title} ${item.snippet}`),
     usedIn: `${reportNode.title}｜检索词：${item.query}`,
     snippet: item.snippet,
-    query: item.query
+    query: item.query,
+    companyName
   }));
 }
 
@@ -1379,6 +1839,7 @@ function normalizeDraft(raw, reportNode) {
 function selectSourcesForPrompt(state, reportNode, options = {}) {
   const maxSources = options.maxSources ?? 16;
   const maxSnippetLength = options.maxSnippetLength ?? 700;
+  const companyName = String(state.project?.companyName || "").trim();
   const title = reportNode.title || "";
   const id = reportNode.id || "";
   const score = (source) => {
@@ -1394,6 +1855,7 @@ function selectSourcesForPrompt(state, reportNode, options = {}) {
   };
 
   return [...state.sources]
+    .filter((source) => !isAutomaticSearchSource(source) || sourceMatchesCompany(source, companyName))
     .map((source, index) => ({ source, index, score: score(source) }))
     .filter((item) => item.score > 0 || item.index < 6)
     .sort((a, b) => b.score - a.score || a.index - b.index)
@@ -1469,6 +1931,7 @@ ${methods || "暂无启用方式。"}
       role: "system",
       content:
         `你是严谨的企业公开资料与资本合作分析助手。必须基于用户上传资料、外部检索结果和已列明来源作答。禁止编造事实、融资金额、估值、股东、公告或负面信息。没有来源的内容只能写入 missingInfo 或待核实，不能写成确定事实。
+【时间要求】明确禁止将2024年及以前的数据当作“最新”数据处理！分析所有“最新”、“当前”状态时，必须强制优先使用 2026 年（实在没有则用 2025 年）的数据。2024 年及以前的数据只能作为历史回顾。
 【格式高压线】必须返回严格、合法的JSON对象格式！(1) 所有文本换行必须转义为 \\n，绝不输出真实的换行符；(2) 内部双引号必须转义为 \\"，强烈建议在分析文本中直接使用中文双引号（“”）取代英文双引号；(3) 确保没有多余或缺失的逗号，不要Markdown格式包裹。
 
 报告全局风格要求（必须严格遵守）：
@@ -1545,7 +2008,7 @@ function buildCompactSectionPrompt(state, reportNode) {
   return [
     {
       role: "system",
-      content: "你是企业公开资料分析助手。只返回严格JSON对象，不要Markdown代码块。禁止编造没有来源支撑的融资、估值、股东、财务、处罚、诉讼、客户或合作事实；不确定内容写入missingInfo。"
+      content: "你是企业公开资料分析助手。只返回严格JSON对象，不要Markdown代码块。禁止编造没有来源支撑的融资、估值、股东、财务、处罚、诉讼、客户或合作事实；不确定内容写入missingInfo。明确禁止将2024年及以前的数据当作最新数据，最新数据必须且只能基于2026年或2025年来源。"
     },
     {
       role: "user",
@@ -1597,6 +2060,23 @@ function friendlyModelConnectionError(message = "") {
   return message;
 }
 
+function sectionMaxTokens(reportNode) {
+  if (reportNode.depth === "简版") return 1200;
+  if (reportNode.depth === "标准") return 2000;
+  if (reportNode.depth === "深入") return 3200;
+  return 900;
+}
+
+function sectionPromptOptions(reportNode, mode = "normal") {
+  const depth = reportNode.depth;
+  if (mode === "compact") {
+    return { maxSources: 5, maxSnippetLength: 220 };
+  }
+  if (depth === "简版") return { maxSources: 4, maxSnippetLength: 220 };
+  if (depth === "标准") return { maxSources: 6, maxSnippetLength: 280 };
+  return { maxSources: 8, maxSnippetLength: 360 };
+}
+
 async function callOpenSearchForSection(state, reportNode) {
   const { apiKey, openSearchHost, openSearchAppName, model } = state.settings.qwen;
   if (!apiKey) {
@@ -1629,16 +2109,20 @@ async function callOpenSearchForSection(state, reportNode) {
       })
     }, 90000);
 
-  let response = await requestOpenSearch(buildSectionPrompt(state, reportNode), 4096);
+  const maxTokens = sectionMaxTokens(reportNode);
+  let response = await requestOpenSearch(buildSectionPrompt(state, reportNode, sectionPromptOptions(reportNode)), maxTokens);
   let text = await response.text();
   if (!response.ok && response.status >= 400) {
     console.error(`OpenSearch 首次生成失败，尝试压缩来源后重试：${response.status} ${text.slice(0, 200)}`);
-    response = await requestOpenSearch(buildSectionPrompt(state, reportNode, { maxSources: 8, maxSnippetLength: 320 }), 3072);
+    response = await requestOpenSearch(
+      buildSectionPrompt(state, reportNode, sectionPromptOptions(reportNode, "compact")),
+      Math.min(maxTokens, 1800)
+    );
     text = await response.text();
   }
   if (!response.ok && response.status >= 400) {
     console.error(`OpenSearch 压缩来源仍失败，切换极简提示词重试：${response.status} ${text.slice(0, 200)}`);
-    response = await requestOpenSearch(buildCompactSectionPrompt(state, reportNode), 1800);
+    response = await requestOpenSearch(buildCompactSectionPrompt(state, reportNode), Math.min(maxTokens, 1400));
     text = await response.text();
   }
   let payload;
@@ -1680,7 +2164,8 @@ async function callQwenForSection(state, reportNode) {
   const completion = await client.chat.completions.create({
     model,
     temperature: 0.2,
-    messages: buildSectionPrompt(state, reportNode),
+    max_tokens: sectionMaxTokens(reportNode),
+    messages: buildSectionPrompt(state, reportNode, sectionPromptOptions(reportNode)),
     response_format: { type: "json_object" }
   });
   recordTokenUsage(state, completion.usage);
@@ -1965,10 +2450,317 @@ async function buildDocx(state) {
     .replace(/[^\p{Script=Han}\w.-]+/gu, "-")
     .slice(0, 80);
   const filename = `${slug}.docx`;
-  const filepath = path.join(EXPORT_DIR, filename);
+  const filepath = path.join(userExportDir(), filename);
+  await fs.mkdir(path.dirname(filepath), { recursive: true });
   await fs.writeFile(filepath, buffer);
   return { filename, url: `/exports/${filename}` };
 }
+
+app.get("/api/auth/me", async (req, res, next) => {
+  try {
+    const user = await findUserFromRequest(req);
+    if (!user) {
+      res.status(401).json({ message: "请先登录。" });
+      return;
+    }
+    res.json({ user: publicUser(user) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/auth/register", async (req, res, next) => {
+  try {
+    const username = String(req.body?.username || "").trim();
+    const password = String(req.body?.password || "");
+    const displayName = String(req.body?.displayName || username).trim();
+    if (!/^[a-zA-Z0-9_-]{3,32}$/.test(username)) {
+      res.status(400).json({ message: "用户名需为 3-32 位字母、数字、下划线或短横线。" });
+      return;
+    }
+    if (password.length < 8) {
+      res.status(400).json({ message: "密码至少需要 8 位。" });
+      return;
+    }
+    const users = await readUsers();
+    if (users.some((item) => item.username.toLowerCase() === username.toLowerCase())) {
+      res.status(409).json({ message: "用户名已存在。" });
+      return;
+    }
+    const user = {
+      id: `user_${randomUUID()}`,
+      username,
+      displayName,
+      passwordHash: hashPassword(password),
+      createdAt: new Date().toISOString(),
+      lastLoginAt: new Date().toISOString()
+    };
+    users.push(user);
+    await writeUsers(users);
+    await ensureUserState(user.id);
+    await createSessionForUser(user, res);
+    res.json({ user: publicUser(user) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/auth/login", async (req, res, next) => {
+  try {
+    const username = String(req.body?.username || "").trim();
+    const password = String(req.body?.password || "");
+    const users = await readUsers();
+    const user = users.find((item) => item.username.toLowerCase() === username.toLowerCase());
+    if (!user || !verifyPassword(password, user.passwordHash)) {
+      res.status(401).json({ message: "用户名或密码错误。" });
+      return;
+    }
+    user.lastLoginAt = new Date().toISOString();
+    await writeUsers(users);
+    await ensureUserState(user.id);
+    await createSessionForUser(user, res);
+    res.json({ user: publicUser(user) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/auth/wechat/start", async (req, res, next) => {
+  try {
+    const state = randomBytes(18).toString("base64url");
+    const now = new Date();
+    const mode = wechatConfigured() ? "wechat-oauth" : "local-mock";
+    const url = mode === "wechat-oauth"
+      ? wechatAuthorizeUrl(req, state)
+      : `${publicBaseUrl(req)}/api/auth/wechat/mock-scan/${state}`;
+    const intent = {
+      id: `wx_${randomUUID()}`,
+      state,
+      mode,
+      status: "pending",
+      createdAt: now.toISOString(),
+      expiresAt: new Date(now.getTime() + WECHAT_LOGIN_MAX_AGE_MS).toISOString()
+    };
+    const intents = await readWechatLoginIntents();
+    intents.push(intent);
+    await writeWechatLoginIntents(intents);
+    const svg = await QRCode.toString(url, {
+      type: "svg",
+      margin: 1,
+      width: 220,
+      color: {
+        dark: "#1e3a5f",
+        light: "#ffffff"
+      }
+    });
+    res.json({
+      state,
+      mode,
+      expiresAt: intent.expiresAt,
+      qrSvg: svg,
+      scanUrl: mode === "local-mock" ? url : undefined
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/auth/wechat/status/:state", async (req, res, next) => {
+  try {
+    const state = String(req.params.state || "");
+    const intents = await readWechatLoginIntents();
+    const intent = intents.find((item) => item.state === state);
+    if (!intent) {
+      res.status(404).json({ status: "expired", message: "二维码已过期，请刷新后重试。" });
+      return;
+    }
+    if (new Date(intent.expiresAt).getTime() <= Date.now() && intent.status !== "confirmed") {
+      intent.status = "expired";
+      await writeWechatLoginIntents(intents);
+      res.status(410).json({ status: "expired", message: "二维码已过期，请刷新后重试。" });
+      return;
+    }
+    if (intent.status !== "confirmed" || !intent.userId) {
+      res.json({ status: intent.status || "pending" });
+      return;
+    }
+    const users = await readUsers();
+    const user = users.find((item) => item.id === intent.userId);
+    if (!user) {
+      res.status(404).json({ status: "expired", message: "微信用户不存在，请重新扫码。" });
+      return;
+    }
+    user.lastLoginAt = new Date().toISOString();
+    await writeUsers(users);
+    await ensureUserState(user.id);
+    await createSessionForUser(user, res);
+    intent.status = "consumed";
+    await writeWechatLoginIntents(intents);
+    res.json({ status: "authenticated", user: publicUser(user) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/auth/wechat/mock-scan/:state", async (req, res, next) => {
+  try {
+    const state = String(req.params.state || "");
+    const intents = await readWechatLoginIntents();
+    const intent = intents.find((item) => item.state === state);
+    if (!intent || new Date(intent.expiresAt).getTime() <= Date.now()) {
+      res.status(410).send("<h1>二维码已过期</h1><p>请回到电脑端刷新二维码。</p>");
+      return;
+    }
+    const escapedState = state.replace(/"/g, "&quot;");
+    res.type("html").send(`<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>微信扫码登录确认</title>
+    <style>
+      body { margin: 0; min-height: 100dvh; display: grid; place-items: center; font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; background: #eef1f5; color: #1e293b; }
+      main { width: min(360px, calc(100% - 32px)); border: 1px solid #dbe3ef; border-radius: 18px; background: rgba(255,255,255,.86); box-shadow: 0 24px 70px rgba(30,58,95,.18); padding: 28px; text-align: center; }
+      h1 { margin: 0 0 8px; font-size: 24px; color: #1e3a5f; }
+      p { margin: 0 0 22px; color: #64748b; line-height: 1.7; }
+      input { width: 100%; box-sizing: border-box; height: 42px; border: 1px solid #cbd5e1; border-radius: 9px; padding: 0 12px; margin-bottom: 14px; font: inherit; }
+      button { width: 100%; height: 44px; border: 0; border-radius: 9px; background: #1e3a5f; color: #fff; font-weight: 800; font-size: 15px; }
+      small { display: block; margin-top: 14px; color: #94a3b8; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>确认登录</h1>
+      <p>本地测试模式：点击确认后，电脑端会以微信用户身份进入系统。</p>
+      <form method="post" action="/api/auth/wechat/mock-confirm">
+        <input type="hidden" name="state" value="${escapedState}" />
+        <input name="nickname" placeholder="微信昵称（可选）" value="微信本地用户" />
+        <button type="submit">确认登录</button>
+      </form>
+      <small>真实微信扫码登录需配置开放平台 AppID/AppSecret。</small>
+    </main>
+  </body>
+</html>`);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/auth/wechat/mock-confirm", async (req, res, next) => {
+  try {
+    const state = String(req.body?.state || "");
+    const nickname = String(req.body?.nickname || "微信本地用户").trim() || "微信本地用户";
+    const intents = await readWechatLoginIntents();
+    const intent = intents.find((item) => item.state === state);
+    if (!intent || new Date(intent.expiresAt).getTime() <= Date.now()) {
+      res.status(410).send("<h1>二维码已过期</h1><p>请回到电脑端刷新二维码。</p>");
+      return;
+    }
+    const user = await createWechatUser({
+      openid: "local_mock_wechat_user",
+      unionid: "local_mock_wechat_user",
+      nickname
+    });
+    await markWechatIntentConfirmed(state, user.id);
+    res.type("html").send(`<!doctype html><html lang="zh-CN"><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><body style="margin:0;min-height:100dvh;display:grid;place-items:center;font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;background:#eef1f5;color:#1e3a5f;text-align:center"><main><h1>已确认登录</h1><p>请回到电脑端继续使用清大浦恒 AI。</p></main></body></html>`);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/auth/wechat/callback", async (req, res, next) => {
+  try {
+    if (!wechatConfigured()) {
+      res.status(400).send("微信登录尚未配置。");
+      return;
+    }
+    const code = String(req.query.code || "");
+    const state = String(req.query.state || "");
+    if (!code || !state) {
+      res.status(400).send("微信回调缺少 code 或 state。");
+      return;
+    }
+    const tokenUrl = new URL("https://api.weixin.qq.com/sns/oauth2/access_token");
+    tokenUrl.searchParams.set("appid", process.env.WECHAT_APP_ID);
+    tokenUrl.searchParams.set("secret", process.env.WECHAT_APP_SECRET);
+    tokenUrl.searchParams.set("code", code);
+    tokenUrl.searchParams.set("grant_type", "authorization_code");
+    const tokenResponse = await fetch(tokenUrl);
+    const tokenPayload = await tokenResponse.json();
+    if (!tokenResponse.ok || tokenPayload.errcode) {
+      res.status(502).send(`微信授权失败：${tokenPayload.errmsg || tokenResponse.statusText}`);
+      return;
+    }
+    const userInfoUrl = new URL("https://api.weixin.qq.com/sns/userinfo");
+    userInfoUrl.searchParams.set("access_token", tokenPayload.access_token);
+    userInfoUrl.searchParams.set("openid", tokenPayload.openid);
+    userInfoUrl.searchParams.set("lang", "zh_CN");
+    const userInfoResponse = await fetch(userInfoUrl);
+    const profile = await userInfoResponse.json();
+    if (!userInfoResponse.ok || profile.errcode) {
+      res.status(502).send(`微信用户信息获取失败：${profile.errmsg || userInfoResponse.statusText}`);
+      return;
+    }
+    const user = await createWechatUser(profile);
+    await markWechatIntentConfirmed(state, user.id);
+    res.type("html").send(`<!doctype html><html lang="zh-CN"><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><body style="margin:0;min-height:100dvh;display:grid;place-items:center;font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;background:#eef1f5;color:#1e3a5f;text-align:center"><main><h1>微信授权成功</h1><p>请回到电脑端继续使用清大浦恒 AI。</p></main></body></html>`);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/auth/dev", async (_req, res, next) => {
+  try {
+    const users = await readUsers();
+    let user = users.find((item) => item.username === "dev");
+    const now = new Date().toISOString();
+    if (!user) {
+      user = {
+        id: "user_dev",
+        username: "dev",
+        displayName: "Dev",
+        passwordHash: hashPassword(randomBytes(24).toString("hex")),
+        createdAt: now,
+        lastLoginAt: now
+      };
+      users.push(user);
+    } else {
+      user.lastLoginAt = now;
+    }
+    await writeUsers(users);
+    await ensureUserState(user.id);
+    await createSessionForUser(user, res);
+    res.json({ user: publicUser(user) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/auth/logout", async (req, res, next) => {
+  try {
+    const token = parseCookies(req.headers.cookie || "")[SESSION_COOKIE];
+    if (token) {
+      const tokenHash = hashToken(token);
+      const sessions = (await readSessions()).filter((item) => item.tokenHash !== tokenHash);
+      await writeSessions(sessions);
+    }
+    clearSessionCookie(res);
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.use("/api", requireAuth);
+
+app.get("/exports/:filename", requireAuth, async (req, res, next) => {
+  try {
+    const filename = path.basename(req.params.filename);
+    res.sendFile(path.join(userExportDir(req.user.id), filename));
+  } catch (error) {
+    next(error);
+  }
+});
 
 app.get("/api/state", async (_req, res) => {
   const state = await readState();
@@ -1977,7 +2769,21 @@ app.get("/api/state", async (_req, res) => {
 
 app.patch("/api/project", async (req, res) => {
   const state = await readState();
+  const previousCompanyName = String(state.project?.companyName || "").trim();
   state.project = { ...state.project, ...req.body };
+  const nextCompanyName = String(state.project?.companyName || "").trim();
+  if (Object.prototype.hasOwnProperty.call(req.body ?? {}, "companyName")) {
+    const removed = removeAutomaticSourcesForOtherCompanies(state, nextCompanyName);
+    const marked = markCurrentCompanySources(state);
+    state.meta ??= {};
+    state.meta.lastCompanySourceScope = {
+      previousCompanyName,
+      currentCompanyName: nextCompanyName,
+      removedAutomaticSources: removed,
+      markedAutomaticSources: marked,
+      updatedAt: new Date().toISOString()
+    };
+  }
   if (req.body?.researchRequirement) {
     state.framework = applyResearchDepths(state.framework, state.project.researchRequirement);
     syncSectionsWithFramework(state);
@@ -2116,7 +2922,8 @@ app.patch("/api/sections/:id", async (req, res) => {
   res.json(publicState(state));
 });
 
-async function generateDraftForSection(sectionId) {
+async function generateDraftForSection(sectionId, userId = currentUserId()) {
+  return stateContext.run({ userId }, async () => {
   try {
     const state = await readState();
     const reportNode = findNode(state.framework, sectionId);
@@ -2125,7 +2932,12 @@ async function generateDraftForSection(sectionId) {
     const section = state.sections[sectionId] ?? createBlankSection(reportNode);
     if (section?.locked) return;
 
-    const existingUrls = new Set(state.sources.map((s) => s.url).filter(Boolean));
+    const existingUrls = new Set(
+      state.sources
+        .filter((source) => !isAutomaticSearchSource(source) || sourceMatchesCompany(source, state.project?.companyName))
+        .map((s) => s.url)
+        .filter(Boolean)
+    );
     const searchResults = await searchPublicSources(state, reportNode);
     const newSources = searchResults.filter((s) => s.url && !existingUrls.has(s.url));
     if (newSources.length > 0) {
@@ -2145,6 +2957,7 @@ async function generateDraftForSection(sectionId) {
     await writeState(state);
     console.error(`章节生成失败 ${sectionId}:`, error);
   }
+  });
 }
 
 app.post("/api/sections/:id/draft", async (req, res, next) => {
@@ -2167,8 +2980,9 @@ app.post("/api/sections/:id/draft", async (req, res, next) => {
     reportNode.status = "generating";
     state.sections[req.params.id] = { ...section, status: "generating" };
     await writeState(state);
+    const userId = req.user.id;
     setTimeout(() => {
-      generateDraftForSection(req.params.id).catch((error) => {
+      generateDraftForSection(req.params.id, userId).catch((error) => {
         console.error(`章节生成后台任务失败 ${req.params.id}:`, error);
       });
     }, 0);
@@ -2250,9 +3064,10 @@ app.post("/api/upload", upload.array("files"), async (req, res) => {
   }));
   state.files.push(...uploaded);
   if (uploaded.length) {
+    const companyName = String(state.project?.companyName || "").trim();
     state.sources.push(
       ...uploaded.map((file) =>
-        citation(file.id, file.originalName, "上传材料", "用户上传资料", "", file.uploadedAt.slice(0, 10))
+        citation(file.id, file.originalName, "上传材料", "用户上传资料", "", file.uploadedAt.slice(0, 10), companyName)
       )
     );
   }
@@ -2313,7 +3128,12 @@ app.post("/api/report/generate", async (req, res) => {
         const freshState = await readState();
         const freshNode = findNode(freshState.framework, reportNode.id) ?? reportNode;
 
-        const existingUrls = new Set(freshState.sources.map((s) => s.url).filter(Boolean));
+        const existingUrls = new Set(
+          freshState.sources
+            .filter((source) => !isAutomaticSearchSource(source) || sourceMatchesCompany(source, freshState.project?.companyName))
+            .map((s) => s.url)
+            .filter(Boolean)
+        );
         const searchResults = await searchPublicSources(freshState, freshNode);
         const newSources = searchResults.filter((s) => s.url && !existingUrls.has(s.url));
         if (newSources.length > 0) {

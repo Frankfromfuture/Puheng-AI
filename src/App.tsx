@@ -10,7 +10,9 @@ import {
   Database,
   Download,
   Eraser,
+  FileStack,
   FileText,
+  GitBranch,
   GripVertical,
   Handshake,
   KeyRound,
@@ -22,15 +24,17 @@ import {
   PlayCircle,
   Plus,
   Puzzle,
+  QrCode,
   RefreshCcw,
   Save,
   Settings as SettingsIcon,
+  Share2,
   SlidersHorizontal,
   Sparkles,
   Target,
-  Trash2,
   Unlock,
   Upload,
+  User,
   Zap
 } from "lucide-react";
 import { ChangeEvent, DragEvent, MouseEventHandler, ReactNode, useEffect, useMemo, useRef, useState } from "react";
@@ -38,6 +42,7 @@ import type {
   AnalysisDepth,
   AnalysisSection,
   AppState,
+  AuthUser,
   ExternalApiSetting,
   LandingMethod,
   LandingRegion,
@@ -51,6 +56,27 @@ import type {
 } from "./types";
 
 const api = {
+  async getMe(): Promise<{ user: AuthUser }> {
+    return request("/api/auth/me");
+  },
+  async login(username: string, password: string): Promise<{ user: AuthUser }> {
+    return request("/api/auth/login", { method: "POST", body: JSON.stringify({ username, password }) });
+  },
+  async register(username: string, password: string, displayName?: string): Promise<{ user: AuthUser }> {
+    return request("/api/auth/register", { method: "POST", body: JSON.stringify({ username, password, displayName }) });
+  },
+  async devLogin(): Promise<{ user: AuthUser }> {
+    return request("/api/auth/dev", { method: "POST" });
+  },
+  async startWechatLogin(): Promise<{ state: string; mode: "local-mock" | "wechat-oauth"; expiresAt: string; qrSvg: string; scanUrl?: string }> {
+    return request("/api/auth/wechat/start", { method: "POST" });
+  },
+  async checkWechatLogin(state: string): Promise<{ status: "pending" | "confirmed" | "authenticated" | "expired" | "consumed"; user?: AuthUser; message?: string }> {
+    return request(`/api/auth/wechat/status/${encodeURIComponent(state)}`);
+  },
+  async logout(): Promise<{ ok: boolean }> {
+    return request("/api/auth/logout", { method: "POST" });
+  },
   async getState(): Promise<AppState> {
     return request("/api/state");
   },
@@ -100,10 +126,25 @@ async function request<T>(url: string, init: RequestInit = {}): Promise<T> {
     init.body instanceof FormData
       ? init.headers
       : { "Content-Type": "application/json", ...(init.headers ?? {}) };
-  const response = await fetch(url, { ...init, headers });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.message || "请求失败");
-  return payload as T;
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 20000);
+  try {
+    const response = await fetch(url, { ...init, headers, credentials: "include", signal: init.signal ?? controller.signal });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const error = new Error(payload.message || "请求失败");
+      (error as Error & { status?: number }).status = response.status;
+      throw error;
+    }
+    return payload as T;
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error("请求超时，请确认后端服务已启动后重试。");
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
+  }
 }
 
 function wait(ms: number) {
@@ -119,7 +160,7 @@ const depthOptions: AnalysisDepth[] = ["省略", "简版", "标准", "深入"];
 
 const requirementOptions: Array<{ id: ResearchRequirement; label: string; shortLabel: string; focus: string; icon: typeof Zap }> = [
   { id: "brief", label: "简要分析", shortLabel: "简要", focus: "只生成一级目录，二级及以下省略", icon: Zap },
-  { id: "fundamental", label: "基本面深度分析", shortLabel: "基本面", focus: "企业基本面深入，其余相应变化", icon: BarChart3 },
+  { id: "fundamental", label: "基础深度分析", shortLabel: "基础", focus: "企业基本面深入，其余相应变化", icon: BarChart3 },
   { id: "investment", label: "投资合作分析", shortLabel: "投资", focus: "产业分析与资本分析重点", icon: Briefcase },
   { id: "landing", label: "招商落地分析", shortLabel: "招商", focus: "产业分析与区域交叉分析重点", icon: Building2 },
   { id: "enablement", label: "赋能合作分析", shortLabel: "赋能", focus: "资源复合与赋能分析重点", icon: Puzzle },
@@ -158,6 +199,77 @@ function confidenceLabel(score: number | undefined, status: SectionStatus): { te
 
 type FlatNode = { node: ReportNode; level: number; parentId: string; numbering: string };
 type ModelHealth = "not_configured" | "checking" | "connected" | "failed";
+type ActiveView =
+  | "home"
+  | "dashboard"
+  | "companyDatabase"
+  | "companyGraph"
+  | "projectManagement"
+  | "parkAnalysis"
+  | "settings"
+  | "files"
+  | "prompts";
+
+type PlatformModule = {
+  id: Exclude<ActiveView, "home" | "settings" | "files">;
+  title: string;
+  subtitle: string;
+  description: string;
+  art: string;
+};
+
+const platformModules: PlatformModule[] = [
+  {
+    id: "dashboard",
+    title: "企业分析平台",
+    subtitle: "Enterprise Analysis",
+    description: "企业基础、市场、资本、赋能与落地分析的一体化生成工作台。",
+    art: "/module-art/enterprise-analysis.svg"
+  },
+  {
+    id: "companyDatabase",
+    title: "项目追踪系统",
+    subtitle: "Project Tracking",
+    description: "追踪线索、任务节点、推进状态与交付记录，沉淀项目过程资产。",
+    art: "/module-art/project-tracking.svg"
+  },
+  {
+    id: "companyGraph",
+    title: "企业赋能系统",
+    subtitle: "Enterprise Enablement",
+    description: "连接资本、客户、园区与产业资源，识别可推进的赋能路径。",
+    art: "/module-art/enterprise-enablement.svg"
+  },
+  {
+    id: "projectManagement",
+    title: "企业知识库RAG",
+    subtitle: "Knowledge Base RAG",
+    description: "组织企业资料、公开信息与历史报告，为检索问答和事实追溯提供底座。",
+    art: "/module-art/knowledge-base.svg"
+  },
+  {
+    id: "parkAnalysis",
+    title: "园区分析系统",
+    subtitle: "Park Intelligence",
+    description: "围绕园区载体、产业图谱和招商匹配，形成区域资源研判视图。",
+    art: "/module-art/park-analysis.svg"
+  },
+  {
+    id: "prompts",
+    title: "Harness 工程",
+    subtitle: "Prompt Engineering",
+    description: "管理报告风格、颗粒度指令与生成规范，让输出持续可控。",
+    art: "/module-art/prompt-engineering.svg"
+  }
+];
+
+function greetingPeriod() {
+  const hour = new Date().getHours();
+  if (hour >= 5 && hour < 11) return "早上";
+  if (hour >= 11 && hour < 13) return "中午";
+  if (hour >= 13 && hour < 18) return "下午";
+  return "晚上";
+}
 
 function flatten(nodes: ReportNode[], level = 1, parentId = "", prefix = ""): FlatNode[] {
   return nodes.flatMap((node, index) => {
@@ -226,6 +338,7 @@ function createNode(title = "自定义章节"): ReportNode {
     includeInWord: true,
     depth: "标准",
     notes: "",
+    searchKeywords: "",
     status: "not_started",
     locked: false,
     children: []
@@ -437,7 +550,20 @@ function MarkdownPreview({ text }: { text: string }) {
 
 export default function App() {
   const [state, setState] = useState<AppState | null>(null);
-  const [activeView, setActiveView] = useState<"dashboard" | "companyDatabase" | "companyGraph" | "settings" | "files" | "prompts">("dashboard");
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [authMode, setAuthMode] = useState<"login" | "register">("login");
+  const [authForm, setAuthForm] = useState({ username: "", password: "", displayName: "" });
+  const [wechatLogin, setWechatLogin] = useState<{
+    state: string;
+    mode: "local-mock" | "wechat-oauth";
+    expiresAt: string;
+    qrSvg: string;
+    scanUrl?: string;
+    status: "idle" | "pending" | "confirmed" | "expired";
+  } | null>(null);
+  const [workspaceLoadError, setWorkspaceLoadError] = useState("");
+  const [activeView, setActiveView] = useState<ActiveView>("home");
   const [activeSectionId, setActiveSectionId] = useState("capital-cooperation");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState("");
@@ -454,8 +580,11 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     api
-      .getState()
-      .then((next) => {
+      .getMe()
+      .then(async ({ user }) => {
+        if (cancelled) return;
+        setAuthUser(user);
+        const next = await api.getState();
         if (cancelled) return;
         setState(next);
         if (next.settings.qwen.apiKeyConfigured) {
@@ -470,9 +599,19 @@ export default function App() {
       })
       .catch((error) => {
         if (!cancelled) {
-          setModelHealth("failed");
-          setMessage(error.message);
+          const status = (error as Error & { status?: number }).status;
+          if (status === 401) {
+            setAuthUser(null);
+            setState(null);
+            setModelHealth("not_configured");
+          } else {
+            setModelHealth("failed");
+            setMessage(error.message);
+          }
         }
+      })
+      .finally(() => {
+        if (!cancelled) setAuthChecked(true);
       });
     return () => { cancelled = true; };
   }, []);
@@ -490,6 +629,12 @@ export default function App() {
     connected: { label: "已联通", cls: "ok", hint: "模型连接测试成功" },
     failed: { label: "未联通", cls: "warn", hint: "模型连接测试失败，点击重试" }
   };
+  const activeTitle =
+    activeView === "home"
+      ? "Atlas 智慧操作中台"
+      : activeView === "settings"
+        ? "设置"
+        : platformModules.find((module) => module.id === activeView)?.title ?? "企业分析平台";
 
   async function withBusy<T>(label: string, action: () => Promise<T>) {
     setBusy(label);
@@ -502,6 +647,117 @@ export default function App() {
     } finally {
       setBusy("");
     }
+  }
+
+  async function loadWorkspaceAfterAuth(user: AuthUser) {
+    setAuthUser(user);
+    setWorkspaceLoadError("");
+    try {
+      const next = await api.getState();
+      applyState(next);
+      if (next.settings.qwen.apiKeyConfigured) {
+        setModelHealth("checking");
+        api.testQwen().then(() => setModelHealth("connected")).catch(() => setModelHealth("failed"));
+      } else {
+        setModelHealth("not_configured");
+      }
+    } catch (error) {
+      setModelHealth("failed");
+      setWorkspaceLoadError(error instanceof Error ? error.message : "工作区加载失败。");
+    }
+  }
+
+  async function submitAuth() {
+    const username = authForm.username.trim();
+    const password = authForm.password;
+    if (!username || !password) {
+      setMessage("请输入用户名和密码。");
+      return;
+    }
+    try {
+      setBusy(authMode === "login" ? "登录中" : "注册中");
+      setMessage("");
+      const result =
+        authMode === "login"
+          ? await api.login(username, password)
+          : await api.register(username, password, authForm.displayName.trim() || username);
+      await loadWorkspaceAfterAuth(result.user);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "登录失败。");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function devLogin() {
+    try {
+      setBusy("Dev 登录中");
+      setMessage("");
+      const result = await api.devLogin();
+      await loadWorkspaceAfterAuth(result.user);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Dev 登录失败。");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function startWechatLogin() {
+    try {
+      setBusy("生成微信二维码");
+      setMessage("");
+      const result = await api.startWechatLogin();
+      setWechatLogin({ ...result, status: "pending" });
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "微信二维码生成失败。");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  useEffect(() => {
+    if (!wechatLogin || wechatLogin.status !== "pending") return undefined;
+    let cancelled = false;
+    const timer = window.setInterval(async () => {
+      try {
+        const result = await api.checkWechatLogin(wechatLogin.state);
+        if (cancelled) return;
+        if (result.status === "authenticated" && result.user) {
+          window.clearInterval(timer);
+          setWechatLogin(null);
+          await loadWorkspaceAfterAuth(result.user);
+          return;
+        }
+        if (result.status === "expired") {
+          window.clearInterval(timer);
+          setWechatLogin((prev) => prev ? { ...prev, status: "expired" } : prev);
+          setMessage(result.message || "微信二维码已过期，请刷新后重试。");
+        } else if (result.status === "confirmed") {
+          setWechatLogin((prev) => prev ? { ...prev, status: "confirmed" } : prev);
+        }
+      } catch (error) {
+        const status = (error as Error & { status?: number }).status;
+        if (!cancelled && (status === 404 || status === 410)) {
+          window.clearInterval(timer);
+          setWechatLogin((prev) => prev ? { ...prev, status: "expired" } : prev);
+          setMessage(error instanceof Error ? error.message : "微信二维码已过期，请刷新后重试。");
+        } else if (!cancelled) {
+          setMessage(error instanceof Error ? error.message : "微信登录状态检查失败。");
+        }
+      }
+    }, 1600);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [wechatLogin?.state, wechatLogin?.status]);
+
+  async function logout() {
+    await api.logout().catch(() => undefined);
+    setAuthUser(null);
+    setState(null);
+    setAuthMode("login");
+    setMessage("");
   }
 
   function applyState(next: AppState) {
@@ -602,7 +858,7 @@ export default function App() {
   }
 
   async function clearReport() {
-    const saved = await withBusy("清空分析内容", () => api.clearReport());
+    const saved = await withBusy("清空全部内容", () => api.clearReport());
     if (saved) {
       applyState(saved);
       setMessage("分析内容已全部清空。");
@@ -683,6 +939,7 @@ export default function App() {
     try {
       const response = await fetch("/api/report/generate", {
         method: "POST",
+        credentials: "include",
         signal: controller.signal
       });
       if (!response.ok || !response.body) {
@@ -800,7 +1057,7 @@ export default function App() {
   <meta charset="utf-8" />
   <title>${escapeHtml(state.project.companyName || "企业分析报告")} - PDF</title>
   <style>
-    body { margin: 28px; font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", Arial, sans-serif; color: #18181b; line-height: 1.7; }
+    body { margin: 28px; font-family: "HarmonyOS Sans SC", "HarmonyOS Sans", "PingFang SC", "Microsoft YaHei", Arial, sans-serif; color: #18181b; line-height: 1.7; }
     h1 { font-size: 24px; margin: 0 0 18px; }
     h2 { font-size: 18px; margin: 22px 0 10px; page-break-after: avoid; }
     h3 { font-size: 16px; font-weight: 900; margin: 20px 0 8px; page-break-after: avoid; }
@@ -822,11 +1079,38 @@ export default function App() {
     setTimeout(() => printWindow.print(), 300);
   }
 
+  if (!authChecked) {
+    return (
+      <main className="loading">
+        <Sparkles />
+        <span>正在唤醒 Atlas 智慧操作中台...</span>
+      </main>
+    );
+  }
+
+  if (!authUser) {
+    return (
+      <LoginView
+        mode={authMode}
+        form={authForm}
+        busy={busy}
+        message={message}
+        setMode={setAuthMode}
+        setForm={setAuthForm}
+        onSubmit={submitAuth}
+        onDevLogin={devLogin}
+        onWechatLogin={startWechatLogin}
+        wechatLogin={wechatLogin}
+      />
+    );
+  }
+
   if (!state) {
     return (
       <main className="loading">
         <Sparkles />
-        <span>正在打开清大浦恒 AI 工作台...</span>
+        <span>正在载入个人操作空间...</span>
+        {workspaceLoadError && <small>{workspaceLoadError}</small>}
       </main>
     );
   }
@@ -834,29 +1118,32 @@ export default function App() {
   return (
     <div className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <aside className={`sidebar ${sidebarCollapsed ? "collapsed" : ""}`}>
-        <div className="brand">
+        <button className="brand" type="button" onClick={() => setActiveView("home")} title="返回 Atlas 智慧操作中台">
           <img src="/logo.svg" alt="浦恒 Logo" className={`brand-logo ${sidebarCollapsed ? "collapsed" : ""}`} />
           {!sidebarCollapsed && (
             <div className="brand-copy">
               <strong>清大浦恒 AI</strong>
             </div>
           )}
-        </div>
+        </button>
         <nav>
-          <button className={activeView === "dashboard" ? "active" : ""} onClick={() => setActiveView("dashboard")} title="工作台">
-            <Layers3 size={18} /> {!sidebarCollapsed && <span className="nav-label">工作台</span>}
+          <button className={activeView === "dashboard" ? "active" : ""} onClick={() => setActiveView("dashboard")} title="企业分析平台">
+            <Layers3 size={18} /> {!sidebarCollapsed && <span className="nav-label">企业分析平台</span>}
           </button>
-          <button className={activeView === "companyDatabase" ? "active" : ""} onClick={() => setActiveView("companyDatabase")} title="企业数据库">
-            <Database size={18} /> {!sidebarCollapsed && <span className="nav-label">数据库</span>}
+          <button className={activeView === "companyDatabase" ? "active" : ""} onClick={() => setActiveView("companyDatabase")} title="项目追踪系统">
+            <Database size={18} /> {!sidebarCollapsed && <span className="nav-label">项目追踪系统</span>}
           </button>
-          <button className={activeView === "companyGraph" ? "active" : ""} onClick={() => setActiveView("companyGraph")} title="企业立体关联信息">
-            <Network size={18} /> {!sidebarCollapsed && <span className="nav-label">关联</span>}
+          <button className={activeView === "companyGraph" ? "active" : ""} onClick={() => setActiveView("companyGraph")} title="企业赋能系统">
+            <Network size={18} /> {!sidebarCollapsed && <span className="nav-label">企业赋能系统</span>}
           </button>
-          <button className={activeView === "prompts" ? "active" : ""} onClick={() => setActiveView("prompts")} title="提示词工程">
-            <SlidersHorizontal size={18} /> {!sidebarCollapsed && <span className="nav-label">提示词</span>}
+          <button className={activeView === "projectManagement" ? "active" : ""} onClick={() => setActiveView("projectManagement")} title="企业知识库RAG">
+            <Briefcase size={18} /> {!sidebarCollapsed && <span className="nav-label">企业知识库RAG</span>}
           </button>
-          <button className={activeView === "files" ? "active" : ""} onClick={() => setActiveView("files")} title="资料库">
-            <Upload size={18} /> {!sidebarCollapsed && <span className="nav-label">资料</span>}
+          <button className={activeView === "parkAnalysis" ? "active" : ""} onClick={() => setActiveView("parkAnalysis")} title="园区分析系统">
+            <Building2 size={18} /> {!sidebarCollapsed && <span className="nav-label">园区分析系统</span>}
+          </button>
+          <button className={activeView === "prompts" ? "active" : ""} onClick={() => setActiveView("prompts")} title="Harness 工程">
+            <SlidersHorizontal size={18} /> {!sidebarCollapsed && <span className="nav-label">Harness 工程</span>}
           </button>
           <button className={activeView === "settings" ? "active" : ""} onClick={() => setActiveView("settings")} title="设置">
             <SettingsIcon size={18} /> {!sidebarCollapsed && <span className="nav-label">设置</span>}
@@ -869,10 +1156,10 @@ export default function App() {
               onClick={retestModelConnection}
               title={modelHealthCopy[modelHealth].hint}
             >
-              <span>模型状态</span>
+              <span>当前模型</span>
               <strong>{modelHealthCopy[modelHealth].label}</strong>
               <small className="model-line" title={`当前模型：${state.settings.qwen.model}`}>
-                当前模型 · {state.settings.qwen.provider === "opensearch" ? "OpenSearch" : "DashScope"} · {state.settings.qwen.model}
+                {state.settings.qwen.provider === "opensearch" ? "OpenSearch" : "DashScope"} · {state.settings.qwen.model}
               </small>
               <small className="token-usage-line">
                 Token 输入 {formatTokenCount(modelTokenUsage?.input ?? 0)} / 输出 {formatTokenCount(modelTokenUsage?.output ?? 0)}
@@ -880,8 +1167,13 @@ export default function App() {
             </button>
           )}
           <div className="sidebar-meta">
-            <span>GitHub v0.8</span>
-            {!sidebarCollapsed && <p>developed by frankfromfuture</p>}
+            <div className="sidebar-meta-row">
+              <span>GitHub v0.8</span>
+              {!sidebarCollapsed && <button className="sidebar-logout" onClick={logout}>退出登录</button>}
+            </div>
+            {!sidebarCollapsed && (
+              <p>{authUser.displayName}</p>
+            )}
           </div>
         </div>
         <button
@@ -900,24 +1192,36 @@ export default function App() {
             <strong>清大浦恒 AI</strong>
           </div>
           <div className="topbar-title">
-            <h1>企业智能分析平台</h1>
+            <h1>{activeTitle}</h1>
           </div>
           <div className="top-actions">
             {busy && <span className="busy">{busy}...</span>}
             {message && <span className="toast">{message}</span>}
-            {exportLink && (
-              <a className="button ghost" href={exportLink}>
-                <Download size={16} /> Word
-              </a>
+            {activeView === "dashboard" && (
+              <>
+                {exportLink && (
+                  <a className="button ghost" href={exportLink}>
+                    <Download size={16} /> Word
+                  </a>
+                )}
+                <button className="button primary" onClick={exportDocx} disabled={generatedCount === 0 || Boolean(busy)}>
+                  <FileText size={16} /> Word
+                </button>
+                <button className="button ghost desktop-pdf-export" onClick={exportPdf} disabled={generatedCount === 0 || Boolean(busy)}>
+                  <FileText size={16} /> PDF
+                </button>
+              </>
             )}
-            <button className="button primary" onClick={exportDocx} disabled={generatedCount === 0 || Boolean(busy)}>
-              <FileText size={16} /> Word
-            </button>
-            <button className="button ghost desktop-pdf-export" onClick={exportPdf} disabled={generatedCount === 0 || Boolean(busy)}>
-              <FileText size={16} /> PDF
-            </button>
           </div>
         </header>
+
+        {activeView === "home" && (
+          <PlatformHome
+            userName={authUser.displayName || authUser.username}
+            modules={platformModules}
+            onOpen={(view) => setActiveView(view)}
+          />
+        )}
 
         {activeView === "dashboard" && (
           <Dashboard
@@ -946,11 +1250,39 @@ export default function App() {
         )}
 
         {activeView === "companyDatabase" && (
-          <ConstructionView title="企业数据库" />
+          <ConstructionView
+            title="项目追踪系统"
+            subtitle="Project Tracking Workspace"
+            description="沉淀企业线索、推进阶段、关键任务、交付记录与历史报告，形成可追踪、可复用的项目情报底座。"
+            signals={["项目档案", "推进阶段", "任务节点", "报告版本"]}
+          />
         )}
 
         {activeView === "companyGraph" && (
-          <ConstructionView title="企业立体关联信息" />
+          <ConstructionView
+            title="企业赋能系统"
+            subtitle="Enablement Graph & Resource Radar"
+            description="构建企业、人物、机构、基金、园区与政府平台之间的资源图谱，支撑赋能路径识别与合作抓手发现。"
+            signals={["资源图谱", "股权穿透", "赋能路径", "风险链路"]}
+          />
+        )}
+
+        {activeView === "projectManagement" && (
+          <ConstructionView
+            title="企业知识库RAG"
+            subtitle="Enterprise Knowledge Base RAG"
+            description="将企业资料、公开信息、历史报告和业务判断组织为可检索的知识库，服务报告生成、问答检索与事实追溯。"
+            signals={["知识库", "RAG 检索", "事实追溯", "报告复用"]}
+          />
+        )}
+
+        {activeView === "parkAnalysis" && (
+          <ConstructionView
+            title="园区分析系统"
+            subtitle="Park Intelligence & Attraction Radar"
+            description="围绕园区载体、产业图谱、企业匹配和招商研判，形成区域资源与目标企业之间的智能匹配视图。"
+            signals={["园区载体", "产业图谱", "企业匹配", "招商研判"]}
+          />
         )}
 
         {activeView === "files" && (
@@ -998,13 +1330,122 @@ export default function App() {
   );
 }
 
-function ConstructionView({ title }: { title: string }) {
+function ConstructionView({
+  title,
+  subtitle = "AI Powered Workspace Module",
+  description = "该模块正在接入 Atlas 智慧操作中台的企业情报、任务流与智能体能力。",
+  signals = ["智能研判", "任务流", "情报中枢", "持续追踪"]
+}: {
+  title: string;
+  subtitle?: string;
+  description?: string;
+  signals?: string[];
+}) {
   return (
     <section className="construction-view" aria-label={title}>
       <img src="/logo.svg" alt="浦恒 Logo" className="construction-logo" />
       <div className="construction-copy">
+        <span className="construction-kicker">{subtitle}</span>
         <h2>{title}</h2>
-        <p>建设中，敬请期待</p>
+        <p>{description}</p>
+        <div className="construction-signals" aria-label={`${title}能力点`}>
+          {signals.map((signal) => (
+            <span key={signal}>{signal}</span>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function PlatformHome({
+  userName,
+  modules,
+  onOpen
+}: {
+  userName: string;
+  modules: PlatformModule[];
+  onOpen: (view: PlatformModule["id"]) => void;
+}) {
+  const [hoveredModule, setHoveredModule] = useState<PlatformModule["id"] | null>(null);
+  const widgetRefs = useRef(new Map<PlatformModule["id"], HTMLButtonElement>());
+
+  useEffect(() => {
+    const syncHoverFromPoint = (event: MouseEvent | PointerEvent) => {
+      let next: PlatformModule["id"] | null = null;
+      for (const module of modules) {
+        const element = widgetRefs.current.get(module.id);
+        if (!element) continue;
+        const rect = element.getBoundingClientRect();
+        if (
+          event.clientX >= rect.left &&
+          event.clientX <= rect.right &&
+          event.clientY >= rect.top &&
+          event.clientY <= rect.bottom
+        ) {
+          next = module.id;
+          break;
+        }
+      }
+      setHoveredModule((current) => (current === next ? current : next));
+    };
+
+    const clearHover = () => setHoveredModule(null);
+    document.addEventListener("mousemove", syncHoverFromPoint, { passive: true });
+    document.addEventListener("pointermove", syncHoverFromPoint, { passive: true });
+    window.addEventListener("blur", clearHover);
+    return () => {
+      document.removeEventListener("mousemove", syncHoverFromPoint);
+      document.removeEventListener("pointermove", syncHoverFromPoint);
+      window.removeEventListener("blur", clearHover);
+    };
+  }, [modules]);
+
+  return (
+    <section className="platform-home" aria-label="Atlas 智慧操作中台主界面">
+      <div className="platform-hero">
+        <div>
+          <p className="platform-kicker">Atlas 智慧操作中台</p>
+          <h2>
+            <span>{userName}，{greetingPeriod()}好，</span>
+            <span>工作辛苦了！</span>
+          </h2>
+        </div>
+        <p>
+          从这里进入企业分析、项目追踪、赋能协同、知识库、园区分析与 Harness 工程，
+          将分散信息组织成可行动的工作流。
+        </p>
+      </div>
+
+      <div className="platform-widget-grid">
+        {modules.map((module) => (
+          <button
+            key={module.id}
+            ref={(element) => {
+              if (element) {
+                widgetRefs.current.set(module.id, element);
+              } else {
+                widgetRefs.current.delete(module.id);
+              }
+            }}
+            className={`platform-widget ${hoveredModule === module.id ? "is-hovered" : ""}`}
+            type="button"
+            onClick={() => onOpen(module.id)}
+            onFocus={() => setHoveredModule(module.id)}
+            onBlur={() => setHoveredModule(null)}
+            onMouseEnter={() => setHoveredModule(module.id)}
+            onMouseLeave={() => setHoveredModule(null)}
+            onPointerEnter={() => setHoveredModule(module.id)}
+            onPointerLeave={() => setHoveredModule(null)}
+            aria-label={`进入${module.title}`}
+          >
+            <img className="module-line-art" src={module.art} alt="" aria-hidden="true" />
+            <strong>{module.title}</strong>
+            <small>{module.subtitle}</small>
+            <p>{module.description}</p>
+            <span className="platform-widget-action">进入</span>
+          </button>
+        ))}
       </div>
     </section>
   );
@@ -1058,6 +1499,11 @@ function Dashboard(props: DashboardProps) {
     generatedCount,
     genProgress
   } = props;
+  const [companyDraft, setCompanyDraft] = useState(state.project.companyName);
+
+  useEffect(() => {
+    setCompanyDraft(state.project.companyName);
+  }, [state.project.companyName]);
 
   function patchNode(id: string, patch: Partial<ReportNode>) {
     return saveFramework(updateNode(state.framework, id, patch));
@@ -1106,11 +1552,20 @@ function Dashboard(props: DashboardProps) {
     return saveSettings({ [key]: (state.settings[key] as Array<{ id: string }>).filter((item) => item.id !== id) });
   }
 
+  async function confirmCompanyName() {
+    await saveProject({ companyName: companyDraft.trim() });
+    await clearReport();
+  }
+
+  async function commitCompanyName(value: string) {
+    await saveProject({ companyName: value.trim() });
+  }
+
   const [mobilePanel, setMobilePanel] = useState<"framework" | "resources" | "preview">("preview");
   const mobilePanels = [
     { id: "framework" as const, label: "框架", icon: Layers3 },
     { id: "resources" as const, label: "合作点", icon: Handshake },
-    { id: "preview" as const, label: "报告正文", icon: FileText }
+    { id: "preview" as const, label: "分章节报告", icon: FileText }
   ];
 
   return (
@@ -1123,28 +1578,41 @@ function Dashboard(props: DashboardProps) {
             <DraftInput
               className="company-input"
               value={state.project.companyName}
-              onCommit={(value) => saveProject({ companyName: value })}
+              onCommit={commitCompanyName}
+              onDraftChange={setCompanyDraft}
               placeholder="输入公司名称"
             />
+            <button
+              className="company-confirm-btn"
+              type="button"
+              onClick={confirmCompanyName}
+              disabled={Boolean(busy) || generating}
+              title="确认企业名称并清空原分章节生成报告"
+            >
+              确认
+            </button>
             {!state.project.companyName.trim() && (
               <div className="company-guide-bubble">先输入企业名称</div>
             )}
           </div>
-          <div className="requirement-pills" aria-label="研究要求">
-            {requirementOptions.map((option) => {
-              const Icon = option.icon;
-              return (
-                <button
-                  key={option.id}
-                  className={`req-pill ${state.project.researchRequirement === option.id ? "selected" : ""}`}
-                  onClick={() => saveProject({ researchRequirement: option.id })}
-                  title={`${option.label}：${option.focus}`}
-                >
-                  <Icon size={14} />
-                  <span>{option.shortLabel}</span>
-                </button>
-              );
-            })}
+          <div className="requirement-control">
+            <span className="report-type-label">报告类型：</span>
+            <div className="requirement-pills" aria-label="报告类型">
+              {requirementOptions.map((option) => {
+                const Icon = option.icon;
+                return (
+                  <button
+                    key={option.id}
+                    className={`req-pill ${state.project.researchRequirement === option.id ? "selected" : ""}`}
+                    onClick={() => saveProject({ researchRequirement: option.id })}
+                    title={`${option.label}：${option.focus}`}
+                  >
+                    <Icon size={14} />
+                    <span>{option.shortLabel}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
           <div className="gen-report-area">
             {genProgress && (
@@ -1160,16 +1628,16 @@ function Dashboard(props: DashboardProps) {
               title="清空全部已生成分析内容"
             >
               <Eraser size={15} />
-              清空分析内容
+              清空全部内容
             </button>
             <button
               className={`button gen-report-btn ${generating ? "pausing" : ""}`}
               onClick={generating ? pauseGeneration : generateReport}
               disabled={!generating && Boolean(busy)}
-              title={generating ? "点击暂停生成" : "根据报告框架与资源条件生成完整分析报告"}
+              title={generating ? "点击暂停生成" : "根据报告框架与资源条件生成完整报告"}
             >
               <PlayCircle size={15} />
-              {generating ? "暂停生成" : "生成完整分析报告"}
+              {generating ? "暂停生成" : "生成完整报告"}
             </button>
           </div>
         </div>
@@ -1194,9 +1662,12 @@ function Dashboard(props: DashboardProps) {
       {/* Row 2: Three columns — Framework | Resources | Preview */}
       <div className="dashboard-body">
         <div className={`panel framework-panel mobile-panel ${mobilePanel === "framework" ? "mobile-active" : ""}`}>
-          <div className="panel-title">
-            <span>分析框架</span>
-            <button className="icon-button" onClick={addRoot} title="增加一级章节">
+          <div className="panel-title dashboard-section-title">
+            <span className="dashboard-title-label">
+              <GitBranch size={18} />
+              分析框架
+            </span>
+            <button className="icon-button bare-action" onClick={addRoot} title="增加一级章节">
               <Plus size={16} />
             </button>
           </div>
@@ -1244,12 +1715,14 @@ function Dashboard(props: DashboardProps) {
                   ))}
                 </select>
                 {(() => { const conf = confidenceLabel(state.sections[node.id]?.confidenceScore, node.status); return <span className={`status ${conf.cls}`} title={confidenceTitle}>{conf.text}</span>; })()}
-                {node.locked && <Lock size={14} className="lock" />}
-                <button className="icon-button" onClick={(event) => { event.stopPropagation(); addSubsection(node.id); }} title="增加二级章节">
-                  <Plus size={15} />
-                </button>
-                <button className="icon-button danger" onClick={(event) => { event.stopPropagation(); remove(node.id); }} title="删除章节">
-                  <Trash2 size={15} />
+                {node.locked ? <Lock size={14} className="lock" /> : <span aria-hidden="true" />}
+                {level === 1 ? (
+                  <button className="icon-button bare-action" onClick={(event) => { event.stopPropagation(); addSubsection(node.id); }} title="增加二级章节">
+                    <Plus size={15} />
+                  </button>
+                ) : <span className="tree-action-spacer" aria-hidden="true" />}
+                <button className="icon-button delete-x" onClick={(event) => { event.stopPropagation(); remove(node.id); }} title="删除章节">
+                  ×
                 </button>
               </div>
             ))}
@@ -1266,8 +1739,11 @@ function Dashboard(props: DashboardProps) {
         </div>
 
         <div className={`panel report-preview-panel mobile-panel ${mobilePanel === "preview" ? "mobile-active" : ""}`}>
-          <div className="panel-title">
-            <span>报告正文生成</span>
+          <div className="panel-title dashboard-section-title">
+            <span className="dashboard-title-label">
+              <FileStack size={18} />
+              分章节生成报告
+            </span>
             <button className="icon-button" onClick={copyGeneratedReport} title="复制已生成分析报告">
               <Clipboard size={16} />
             </button>
@@ -1321,6 +1797,368 @@ function Dashboard(props: DashboardProps) {
   );
 }
 
+function LoginView({
+  mode,
+  form,
+  busy,
+  message,
+  setMode,
+  setForm,
+  onSubmit,
+  onDevLogin,
+  onWechatLogin,
+  wechatLogin
+}: {
+  mode: "login" | "register";
+  form: { username: string; password: string; displayName: string };
+  busy: string;
+  message: string;
+  setMode: (mode: "login" | "register") => void;
+  setForm: (form: { username: string; password: string; displayName: string }) => void;
+  onSubmit: () => void;
+  onDevLogin: () => void;
+  onWechatLogin: () => void;
+  wechatLogin: {
+    state: string;
+    mode: "local-mock" | "wechat-oauth";
+    expiresAt: string;
+    qrSvg: string;
+    scanUrl?: string;
+    status: "idle" | "pending" | "confirmed" | "expired";
+  } | null;
+}) {
+  const isRegister = mode === "register";
+  const [focused, setFocused] = useState<string | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx) return;
+
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const pointer = { x: null as number | null, y: null as number | null, radius: 140 };
+    let running = true;
+    let frame = 0;
+    let width = 0;
+    let height = 0;
+    let particles: Array<{
+      x: number;
+      y: number;
+      baseX: number;
+      baseY: number;
+      size: number;
+      density: number;
+      repelDist: number;
+      phase: number;
+      microAmp: number;
+      microSpd: number;
+      color: string;
+    }> = [];
+
+    const colors = ["30,58,95", "30,58,95", "58,95,138", "58,95,138", "100,145,190", "125,160,200"];
+    const buildParticles = () => {
+      particles = Array.from({ length: Math.min(900, Math.floor((width * height) / 1200)) }, () => {
+        const x = Math.random() * width;
+        const y = Math.random() * height;
+        return {
+          x,
+          y,
+          baseX: x,
+          baseY: y,
+          size: Math.random() * 1.8 + 0.5,
+          density: Math.random() * 28 + 2,
+          repelDist: (0.45 + Math.random() * 0.5) * pointer.radius,
+          phase: Math.random() * Math.PI * 2,
+          microAmp: 0.25 + Math.random() * 0.45,
+          microSpd: 0.06 + Math.random() * 0.09,
+          color: colors[Math.floor(Math.random() * colors.length)]
+        };
+      });
+    };
+
+    const setSize = () => {
+      width = window.innerWidth;
+      height = window.innerHeight;
+      canvas.width = width * dpr;
+      canvas.height = height * dpr;
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      buildParticles();
+    };
+
+    const onMove = (event: MouseEvent) => {
+      pointer.x = event.clientX;
+      pointer.y = event.clientY;
+    };
+    const onPointerMove = (event: PointerEvent) => {
+      pointer.x = event.clientX;
+      pointer.y = event.clientY;
+    };
+    const onLeave = () => {
+      pointer.x = null;
+      pointer.y = null;
+    };
+
+    setSize();
+    window.addEventListener("resize", setSize);
+    window.addEventListener("mousemove", onMove, { passive: true });
+    document.addEventListener("mousemove", onMove, { passive: true });
+    document.addEventListener("pointermove", onPointerMove, { passive: true });
+    window.addEventListener("mouseleave", onLeave);
+
+    const render = (now: number) => {
+      if (!running) return;
+      const t = now / 1000;
+      ctx.clearRect(0, 0, width, height);
+      for (const particle of particles) {
+        ctx.fillStyle = `rgba(${particle.color},0.58)`;
+        ctx.beginPath();
+        ctx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2);
+        ctx.fill();
+
+        if (pointer.x !== null && pointer.y !== null) {
+          const dx = pointer.x - particle.x;
+          const dy = pointer.y - particle.y;
+          const dist = Math.sqrt(dx * dx + dy * dy) || 0.001;
+          if (dist < pointer.radius) {
+            if (dist > particle.repelDist) {
+              const force = (pointer.radius - dist) / pointer.radius;
+              let fx = (dx / dist) * force * particle.density;
+              let fy = (dy / dist) * force * particle.density;
+              const step = Math.sqrt(fx * fx + fy * fy);
+              const maxStep = dist - particle.repelDist;
+              if (step > maxStep) {
+                const scale = maxStep / step;
+                fx *= scale;
+                fy *= scale;
+              }
+              particle.x += fx;
+              particle.y += fy;
+            }
+            particle.x += Math.sin(t * particle.microSpd + particle.phase) * particle.microAmp;
+            particle.y += Math.cos(t * particle.microSpd * 0.7 + particle.phase * 1.37) * particle.microAmp;
+          } else {
+            particle.x -= (particle.x - particle.baseX) / 14;
+            particle.y -= (particle.y - particle.baseY) / 14;
+          }
+        } else {
+          particle.x -= (particle.x - particle.baseX) / 14;
+          particle.y -= (particle.y - particle.baseY) / 14;
+        }
+      }
+      frame = requestAnimationFrame(render);
+    };
+    const restart = () => {
+      if (!running) return;
+      cancelAnimationFrame(frame);
+      setSize();
+      frame = requestAnimationFrame(render);
+    };
+    frame = requestAnimationFrame(render);
+    window.addEventListener("focus", restart);
+    window.addEventListener("pageshow", restart);
+    document.addEventListener("visibilitychange", restart);
+
+    return () => {
+      running = false;
+      cancelAnimationFrame(frame);
+      window.removeEventListener("resize", setSize);
+      window.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("mouseleave", onLeave);
+      window.removeEventListener("focus", restart);
+      window.removeEventListener("pageshow", restart);
+      document.removeEventListener("visibilitychange", restart);
+    };
+  }, []);
+
+  return (
+    <main className="auth-shell">
+      <canvas ref={canvasRef} className="auth-particles" aria-hidden="true" />
+      <header className="auth-topbar">
+        <div className="auth-brand">
+          <img src="/logo.svg" alt="清大浦恒 AI Logo" />
+          <span>清大浦恒 AI</span>
+        </div>
+        <nav className="auth-nav" aria-label="登录页导航">
+          <span>操作中台</span>
+          <span>数据资产</span>
+          <span>AI Workflow</span>
+        </nav>
+        <button className="auth-help" type="button">Need help?</button>
+      </header>
+
+      <section className="auth-main">
+        <div className="auth-hero">
+          <div className="auth-status">
+            <span />
+            <strong>Atlas OS</strong>
+          </div>
+          <h1>
+            <span>清大浦恒 Atlas</span>
+            <span>智慧数据分析中台</span>
+          </h1>
+          <p>AI 驱动的新型投资与管理工作流</p>
+          <div className="auth-tags" aria-label="核心能力">
+            <span>企业分析平台</span>
+            <span>项目追踪系统</span>
+            <span>企业赋能系统</span>
+            <span>企业知识库RAG</span>
+            <span>园区分析系统</span>
+            <span>Harness 工程</span>
+          </div>
+        </div>
+
+        <div className="auth-card-wrap">
+          <div className="auth-card-glow" />
+          <section className="auth-panel">
+            <div className="auth-panel-line" />
+            <div className="auth-copy">
+              <div className="auth-lockline">
+                <Lock size={13} />
+                <span>Secure access</span>
+              </div>
+              <h2>{isRegister ? "创建操作空间" : "进入操作中台"}</h2>
+              <p>
+                {isRegister
+                  ? "独立保存报告正文、提示词、模型配置与资料库。"
+                  : "继续你的企业智能分析与报告生成工作。"}
+              </p>
+            </div>
+
+            <div className="auth-quick-grid">
+              <button type="button" onClick={onWechatLogin} disabled={Boolean(busy)}>
+                <QrCode size={16} />
+                <span>微信扫码</span>
+              </button>
+              <button type="button" onClick={onDevLogin} disabled={Boolean(busy)}>
+                <Sparkles size={16} />
+                <span>Dev</span>
+              </button>
+            </div>
+
+            {wechatLogin && (
+              <div className="wechat-login-card" aria-live="polite">
+                <div
+                  className="wechat-qr"
+                  dangerouslySetInnerHTML={{ __html: wechatLogin.qrSvg }}
+                />
+                <div className="wechat-login-copy">
+                  <strong>
+                    {wechatLogin.status === "expired"
+                      ? "二维码已过期"
+                      : wechatLogin.status === "confirmed"
+                        ? "已确认，正在进入"
+                        : "请使用微信扫码登录"}
+                  </strong>
+                  <span>
+                    {wechatLogin.mode === "local-mock"
+                      ? "本地测试模式：扫码或打开链接后点击确认。"
+                      : "微信开放平台模式：扫码授权后自动进入。"}
+                  </span>
+                  {wechatLogin.scanUrl && (
+                    <a href={wechatLogin.scanUrl} target="_blank" rel="noreferrer">
+                      本地测试打开授权页
+                    </a>
+                  )}
+                  <button type="button" onClick={onWechatLogin} disabled={Boolean(busy)}>
+                    <RefreshCcw size={14} />
+                    刷新二维码
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="auth-divider">
+              <span>使用账号继续</span>
+            </div>
+
+            <form
+              className="auth-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                onSubmit();
+              }}
+            >
+              {isRegister && (
+                <label className="auth-field">
+                  <span>显示名称</span>
+                  <div className={focused === "displayName" ? "auth-input-wrap active" : "auth-input-wrap"}>
+                    <User size={16} />
+                    <input
+                      value={form.displayName}
+                      onFocus={() => setFocused("displayName")}
+                      onBlur={() => setFocused(null)}
+                      onChange={(event) => setForm({ ...form, displayName: event.target.value })}
+                      placeholder="例如 Frank"
+                    />
+                  </div>
+                </label>
+              )}
+              <label className="auth-field">
+                <span>用户名</span>
+                <div className={focused === "username" ? "auth-input-wrap active" : "auth-input-wrap"}>
+                  <User size={16} />
+                  <input
+                    value={form.username}
+                    onFocus={() => setFocused("username")}
+                    onBlur={() => setFocused(null)}
+                    onChange={(event) => setForm({ ...form, username: event.target.value })}
+                    placeholder="3-32位字母、数字、下划线"
+                    autoComplete="username"
+                  />
+                </div>
+              </label>
+              <label className="auth-field">
+                <span>密码</span>
+                <div className={focused === "password" ? "auth-input-wrap active" : "auth-input-wrap"}>
+                  <Lock size={16} />
+                  <input
+                    type="password"
+                    value={form.password}
+                    onFocus={() => setFocused("password")}
+                    onBlur={() => setFocused(null)}
+                    onChange={(event) => setForm({ ...form, password: event.target.value })}
+                    placeholder="至少8位"
+                    autoComplete={isRegister ? "new-password" : "current-password"}
+                  />
+                </div>
+              </label>
+              <label className="auth-remember">
+                <input type="checkbox" />
+                <span>保持登录 14 天</span>
+              </label>
+              {message && <span className="auth-message">{message}</span>}
+              <button className="auth-submit" type="submit" disabled={Boolean(busy)}>
+                <span>{busy || (isRegister ? "注册并进入" : "登录")}</span>
+                <ChevronRight size={17} />
+              </button>
+            </form>
+
+            <button
+              className="auth-switch"
+              type="button"
+              onClick={() => setMode(isRegister ? "login" : "register")}
+              disabled={Boolean(busy)}
+            >
+              {isRegister ? "已有账号，去登录" : "没有账号，创建一个"}
+            </button>
+            <div className="auth-panel-line bottom" />
+          </section>
+
+          <div className="auth-foot-meta">
+            <span>support@puheng.ai</span>
+            <span>CN / v0.8</span>
+          </div>
+        </div>
+      </section>
+    </main>
+  );
+}
+
 /**
  * DraftInput — React 受控输入框，兼容中文/日文/韩文 IME 输入法。
  * 在 IME 合成过程中（拼音未上屏时）不向父组件提交值，
@@ -1330,12 +2168,14 @@ function Dashboard(props: DashboardProps) {
 function DraftInput({
   value,
   onCommit,
+  onDraftChange,
   className,
   placeholder,
   onClick
 }: {
   value: string;
   onCommit: (value: string) => void;
+  onDraftChange?: (value: string) => void;
   className?: string;
   placeholder?: string;
   onClick?: MouseEventHandler<HTMLInputElement>;
@@ -1354,10 +2194,14 @@ function DraftInput({
       placeholder={placeholder}
       value={draft}
       onClick={onClick}
-      onChange={(event) => setDraft(event.target.value)}
+      onChange={(event) => {
+        setDraft(event.target.value);
+        onDraftChange?.(event.target.value);
+      }}
       onCompositionStart={() => { composingRef.current = true; }}
       onCompositionEnd={(event) => {
         composingRef.current = false;
+        onDraftChange?.((event.target as HTMLInputElement).value);
         onCommit((event.target as HTMLInputElement).value);
       }}
       onBlur={() => {
@@ -1395,8 +2239,11 @@ function ResourcePanel({
 }) {
   return (
     <div className="panel resource-panel">
-      <div className="panel-title">
-        <span>合作点交叉指引</span>
+      <div className="panel-title dashboard-section-title">
+        <span className="dashboard-title-label">
+          <Share2 size={18} />
+          交叉分析
+        </span>
         <SlidersHorizontal size={18} />
       </div>
       <div className="resource-scroll">
@@ -1467,7 +2314,7 @@ function ResourceGroup<T extends { id: string }>({
     <section className="resource-group">
       <header>
         <span>{icon}{title}</span>
-        <button className="icon-button" onClick={onAdd} title="增加自定义项">
+        <button className="icon-button bare-action" onClick={onAdd} title="增加自定义项">
           <Plus size={15} />
         </button>
       </header>
@@ -1491,10 +2338,19 @@ function ResourceItem({
 }) {
   return (
     <div className={`resource-item ${checked ? "enabled" : ""}`}>
-      <input type="checkbox" checked={checked} onChange={(event) => onEnabled(event.target.checked)} />
+      <button
+        className="resource-switch"
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        onClick={() => onEnabled(!checked)}
+        title={checked ? "关闭" : "开启"}
+      >
+        <span />
+      </button>
       <DraftInput className="resource-name" value={name} onCommit={onName} />
-      <button className="icon-button danger" onClick={onRemove} title="删除">
-        <Trash2 size={14} />
+      <button className="icon-button delete-x" onClick={onRemove} title="删除">
+        ×
       </button>
     </div>
   );
@@ -1770,7 +2626,7 @@ function PromptTextarea({ label, value, onSave, rows = 3 }: { label: string; val
       <textarea
         className={`prompt-textarea${dirty ? " dirty" : ""}`}
         value={draft}
-        rows={3}
+        rows={rows}
         onChange={(e) => setDraft(e.target.value)}
       />
       {dirty && (
@@ -1800,6 +2656,9 @@ function PromptEngineeringView({
   function saveNodeNote(id: string, notes: string) {
     saveFramework(updateNode(state.framework, id, { notes }));
   }
+  function saveNodeSearchKeywords(id: string, searchKeywords: string) {
+    saveFramework(updateNode(state.framework, id, { searchKeywords }));
+  }
   function saveResNote(key: "strongResources" | "landingRegions" | "landingMethods", id: string, notes: string) {
     const list = state.settings[key].map((item: StrongResource | LandingRegion | LandingMethod) =>
       item.id === id ? { ...item, notes } : item
@@ -1809,7 +2668,7 @@ function PromptEngineeringView({
   return (
     <div className="prompt-view">
       <div className="prompt-view-header">
-        <h2>提示词工程</h2>
+        <h2>Harness 工程</h2>
         <p>全局风格与各章节、各资源合作点的生成提示词。失焦自动保存，AI 生成时严格遵循。</p>
       </div>
       <section className="prompt-section">
@@ -1847,11 +2706,33 @@ function PromptEngineeringView({
               <div className="prompt-fields-grid">
                 {children.length > 0
                   ? children.map(({ node: l2, numbering: n2 }) => (
-                      <PromptTextarea key={l2.id} label={`${n2}  ${l2.title}`}
-                        value={l2.notes ?? ""} onSave={(v) => saveNodeNote(l2.id, v)} />
-                    ))
-                  : <PromptTextarea label={`${n1}  ${l1.title}`}
-                      value={l1.notes ?? ""} onSave={(v) => saveNodeNote(l1.id, v)} />
+                    <div key={l2.id} className="prompt-chapter-card">
+                      <PromptTextarea
+                        label={`${n2}  ${l2.title}｜信息检索关键词`}
+                        value={l2.searchKeywords ?? ""}
+                        onSave={(v) => saveNodeSearchKeywords(l2.id, v)}
+                        rows={2}
+                      />
+                      <PromptTextarea
+                        label={`${n2}  ${l2.title}｜章节提示词`}
+                        value={l2.notes ?? ""}
+                        onSave={(v) => saveNodeNote(l2.id, v)}
+                      />
+                    </div>
+                  ))
+                  : <div className="prompt-chapter-card">
+                    <PromptTextarea
+                      label={`${n1}  ${l1.title}｜信息检索关键词`}
+                      value={l1.searchKeywords ?? ""}
+                      onSave={(v) => saveNodeSearchKeywords(l1.id, v)}
+                      rows={2}
+                    />
+                    <PromptTextarea
+                      label={`${n1}  ${l1.title}｜章节提示词`}
+                      value={l1.notes ?? ""}
+                      onSave={(v) => saveNodeNote(l1.id, v)}
+                    />
+                  </div>
                 }
               </div>
             </div>

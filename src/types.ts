@@ -13,6 +13,14 @@ export type SectionStatus =
   | "confirmed"
   | "insufficient";
 
+export interface AuthUser {
+  id: string;
+  username: string;
+  displayName: string;
+  createdAt: string;
+  lastLoginAt?: string;
+}
+
 export interface Citation {
   id: string;
   title: string;
@@ -20,6 +28,9 @@ export interface Citation {
   sourceType: string;
   publishedAt?: string;
   usedIn: string;
+  companyName?: string;
+  snippet?: string;
+  query?: string;
 }
 
 export interface ReportNode {
@@ -29,6 +40,7 @@ export interface ReportNode {
   includeInWord: boolean;
   depth: AnalysisDepth;
   notes: string;
+  searchKeywords?: string;
   status: SectionStatus;
   locked: boolean;
   children: ReportNode[];

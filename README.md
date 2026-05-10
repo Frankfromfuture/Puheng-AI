@@ -144,6 +144,33 @@ http://localhost:5173/
 http://localhost:8787/
 ```
 
+### 微信扫码登录与本地数据
+
+系统支持微信扫码登录。未配置微信开放平台参数时，会自动启用本地测试模式：登录页点击「微信扫码」后生成二维码，扫码或打开二维码下方的本地授权链接，确认后电脑端会进入系统。
+
+用户数据按用户独立保存：
+
+```text
+data/users/<user-id>/app-state.json
+```
+
+部署到 ECS 时，可用环境变量把数据目录固定到服务器本地磁盘：
+
+```bash
+PUHENG_DATA_DIR=/data/puheng-ai npm run server
+```
+
+接入真实微信开放平台网站应用时，配置：
+
+```bash
+WECHAT_APP_ID=你的AppID
+WECHAT_APP_SECRET=你的AppSecret
+WECHAT_REDIRECT_URI=https://你的域名/api/auth/wechat/callback
+PUBLIC_BASE_URL=https://你的域名
+```
+
+真实模式下，电脑端二维码使用微信开放平台授权地址，微信回调确认身份后，电脑端轮询接口创建本机登录会话。
+
 ## 校验
 
 ```bash
