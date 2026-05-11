@@ -1,8 +1,26 @@
 import cors from "cors";
 import express from "express";
 import fs from "node:fs/promises";
+import fsSync from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+// Load .env from project root if present (no external deps needed)
+{
+  const envPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../.env");
+  if (fsSync.existsSync(envPath)) {
+    const lines = fsSync.readFileSync(envPath, "utf8").split("\n");
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eq = trimmed.indexOf("=");
+      if (eq === -1) continue;
+      const key = trimmed.slice(0, eq).trim();
+      const val = trimmed.slice(eq + 1).trim();
+      if (key && !(key in process.env)) process.env[key] = val;
+    }
+  }
+}
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
 import multer from "multer";
