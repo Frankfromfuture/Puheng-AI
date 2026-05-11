@@ -419,13 +419,13 @@ function defaultState() {
     },
     settings: {
       qwen: {
-        apiKey: "",
-        provider: "opensearch",
-        baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        apiKey: process.env.QWEN_API_KEY || "",
+        provider: process.env.QWEN_PROVIDER || "opensearch",
+        baseUrl: process.env.QWEN_BASE_URL || "https://dashscope.aliyuncs.com/compatible-mode/v1",
         responsesBaseUrl: "https://dashscope.aliyuncs.com/api/v2/apps/protocols/compatible-mode/v1",
-        openSearchHost: "https://default-hea5.platform-cn-shanghai.opensearch.aliyuncs.com",
-        openSearchAppName: "default",
-        model: "deepseek-v4-flash",
+        openSearchHost: process.env.QWEN_OPENSEARCH_HOST || "https://default-hea5.platform-cn-shanghai.opensearch.aliyuncs.com",
+        openSearchAppName: process.env.QWEN_OPENSEARCH_APP_NAME || "default",
+        model: process.env.QWEN_MODEL || "deepseek-v4-flash",
         region: "华东2（上海）"
       },
       externalApis: [
@@ -788,6 +788,9 @@ async function readState(userId = currentUserId()) {
   const state = JSON.parse(raw);
   const changed = migrateState(state);
   if (changed) await writeState(state, userId);
+  if (!state.settings.qwen.apiKey && process.env.QWEN_API_KEY) {
+    state.settings.qwen.apiKey = process.env.QWEN_API_KEY;
+  }
   return state;
 }
 
